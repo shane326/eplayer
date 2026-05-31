@@ -1,0 +1,12 @@
+/target
+/dist
+sources.json
+live-sources.json
+*.db
+*.sqlite
+*.zip
+*.exe
+*.dll
+*.dylib
+*.so
+*.log

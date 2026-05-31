@@ -1,0 +1,23 @@
+[package]
+name = "eplayer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+axum = "0.8.9"
+encoding_rs = "0.8.35"
+futures-util = "0.3.32"
+html-escape = "0.2.13"
+reqwest = { version = "0.13.4", features = ["json", "gzip", "brotli", "stream"] }
+rusqlite = { version = "0.40.0", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tao = "0.34.5"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "net"] }
+tower-http = { version = "0.6.11", features = ["cors"] }
+url = "2.5.8"
+wry = "0.54.0"
+
+[build-dependencies]
