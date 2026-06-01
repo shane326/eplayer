@@ -66,6 +66,99 @@ jobs:
           chmod +x "$MACOS/ePlayer"
           cp README.md "$RESOURCES/README.md"
           cp sources.example.json "$RESOURCES/sources.example.json"
+          ICONSET="dist/AppIcon.iconset"
+          mkdir -p "$ICONSET"
+          python3 <<'PY'
+          import math
+          import os
+          import struct
+          import zlib
+
+          out_dir = "dist/AppIcon.iconset"
+          sizes = {
+              "icon_16x16.png": 16,
+              "icon_16x16@2x.png": 32,
+              "icon_32x32.png": 32,
+              "icon_32x32@2x.png": 64,
+              "icon_128x128.png": 128,
+              "icon_128x128@2x.png": 256,
+              "icon_256x256.png": 256,
+              "icon_256x256@2x.png": 512,
+              "icon_512x512.png": 512,
+              "icon_512x512@2x.png": 1024,
+          }
+
+          def inside_rounded_rect(x, y, size, margin, radius):
+              left = margin
+              top = margin
+              right = size - margin - 1
+              bottom = size - margin - 1
+              if left + radius <= x <= right - radius and top <= y <= bottom:
+                  return True
+              if left <= x <= right and top + radius <= y <= bottom - radius:
+                  return True
+              for cx, cy in (
+                  (left + radius, top + radius),
+                  (right - radius, top + radius),
+                  (left + radius, bottom - radius),
+                  (right - radius, bottom - radius),
+              ):
+                  if (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2:
+                      return True
+              return False
+
+          def point_in_triangle(px, py, p1, p2, p3):
+              def sign(a, b, c):
+                  return (a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1])
+              b1 = sign((px, py), p1, p2) < 0.0
+              b2 = sign((px, py), p2, p3) < 0.0
+              b3 = sign((px, py), p3, p1) < 0.0
+              return b1 == b2 == b3
+
+          def write_png(path, size):
+              pixels = bytearray()
+              margin = int(size * 0.08)
+              radius = int(size * 0.19)
+              tri = (
+                  (size * 0.40, size * 0.30),
+                  (size * 0.40, size * 0.70),
+                  (size * 0.72, size * 0.50),
+              )
+              for y in range(size):
+                  pixels.append(0)
+                  for x in range(size):
+                      if not inside_rounded_rect(x, y, size, margin, radius):
+                          pixels.extend((0, 0, 0, 0))
+                          continue
+                      t = y / max(1, size - 1)
+                      r = int(16 + 8 * t)
+                      g = int(24 + 22 * t)
+                      b = int(32 + 14 * t)
+                      a = 255
+                      cx = size * 0.50
+                      cy = size * 0.50
+                      glow = max(0.0, 1.0 - math.hypot(x - cx, y - cy) / (size * 0.55))
+                      g = min(255, int(g + 28 * glow))
+                      if point_in_triangle(x + 0.5, y + 0.5, *tri):
+                          r, g, b = 43, 220, 130
+                      pixels.extend((r, g, b, a))
+              raw = bytes(pixels)
+              def chunk(kind, data):
+                  return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+              png = (
+                  b"\x89PNG\r\n\x1a\n"
+                  + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
+                  + chunk(b"IDAT", zlib.compress(raw, 9))
+                  + chunk(b"IEND", b"")
+              )
+              with open(path, "wb") as f:
+                  f.write(png)
+
+          os.makedirs(out_dir, exist_ok=True)
+          for name, size in sizes.items():
+              write_png(os.path.join(out_dir, name), size)
+          PY
+          iconutil -c icns "$ICONSET" -o "$RESOURCES/AppIcon.icns"
 
           cat > "$CONTENTS/Info.plist" <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -84,6 +177,8 @@ jobs:
             <string>ePlayer</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
             <key>CFBundleShortVersionString</key>
             <string>0.1.0</string>
             <key>CFBundleVersion</key>
