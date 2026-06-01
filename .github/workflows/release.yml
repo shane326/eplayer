@@ -29,13 +29,12 @@ jobs:
           Copy-Item target\release\eplayer.exe dist\ePlayer-windows-x64\ePlayer.exe
           Copy-Item README.md dist\ePlayer-windows-x64\README.md
           Copy-Item sources.example.json dist\ePlayer-windows-x64\sources.example.json
-          Compress-Archive -Path dist\ePlayer-windows-x64\* -DestinationPath dist\ePlayer-windows-x64.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ePlayer-windows-x64
-          path: dist/ePlayer-windows-x64.zip
+          path: dist/ePlayer-windows-x64
           if-no-files-found: error
 
   macos-arm64:
@@ -96,11 +95,9 @@ jobs:
           </plist>
           PLIST
 
-          ditto -c -k --keepParent "$APP" dist/ePlayer-macos-arm64.zip
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ePlayer-macos-arm64
-          path: dist/ePlayer-macos-arm64.zip
+          path: dist/ePlayer.app
           if-no-files-found: error
