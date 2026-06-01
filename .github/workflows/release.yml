@@ -55,6 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           APP="dist/ePlayer.app"
+          DMG_DIR="dist/dmg-root"
           CONTENTS="$APP/Contents"
           MACOS="$CONTENTS/MacOS"
           RESOURCES="$CONTENTS/Resources"
@@ -95,9 +96,19 @@ jobs:
           </plist>
           PLIST
 
+          mkdir -p "$DMG_DIR"
+          cp -R "$APP" "$DMG_DIR/ePlayer.app"
+          ln -s /Applications "$DMG_DIR/Applications"
+          hdiutil create \
+            -volname "ePlayer" \
+            -srcfolder "$DMG_DIR" \
+            -ov \
+            -format UDZO \
+            "dist/ePlayer-macos-arm64.dmg"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ePlayer-macos-arm64
-          path: dist/ePlayer.app
+          path: dist/ePlayer-macos-arm64.dmg
           if-no-files-found: error
