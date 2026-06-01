@@ -39,6 +39,7 @@ const state = {
   compactRestorePlaySide: true,
   fullscreenRestorePlaySide: true,
   hideControlsTimer: null,
+  playbackToggleBusy: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -612,6 +613,24 @@ function paintCenterState(targetId, mode) {
   setCenterStateIcon(targetId, mode);
   target.classList.remove("hidden");
   setTimeout(() => target.classList.add("hidden"), 700);
+}
+
+async function toggleVodPlayback(showCenter = true) {
+  const targetVideo = activeVideoForKind("vod");
+  if (!targetVideo || state.playbackToggleBusy) return;
+  state.playbackToggleBusy = true;
+  const willPlay = targetVideo.paused;
+  try {
+    if (willPlay) await targetVideo.play();
+    else targetVideo.pause();
+    if (showCenter) paintCenterState("centerState", willPlay ? "play" : "pause");
+  } catch (error) {
+    console.warn("toggle playback failed", error);
+  } finally {
+    setTimeout(() => {
+      state.playbackToggleBusy = false;
+    }, 160);
+  }
 }
 
 function setStatus(target, text) {
@@ -1538,8 +1557,7 @@ function bindArtEvents(kind, art, start, onReady) {
   });
   targetVideo.addEventListener("pause", () => {
     setPlayerPlayState(kind, false);
-    setCenterStateIcon("centerState", "pause");
-    $("centerState").classList.remove("hidden");
+    $("centerState").classList.add("hidden");
   });
   art.on("ready", () => {
     applyStart(targetVideo, start);
@@ -1552,8 +1570,7 @@ function bindArtEvents(kind, art, start, onReady) {
   });
   art.on("pause", () => {
     setPlayerPlayState(kind, false);
-    setCenterStateIcon("centerState", "pause");
-    $("centerState").classList.remove("hidden");
+    $("centerState").classList.add("hidden");
   });
   art.on("video:waiting", () => {
     $("loadingState").classList.remove("hidden");
@@ -2008,8 +2025,7 @@ on("historyList", "click", async (event) => {
 });
 
 on("playBtn", "click", () => {
-  const targetVideo = activeVideoForKind("vod");
-  targetVideo.paused ? targetVideo.play() : targetVideo.pause();
+  toggleVodPlayback(false);
 });
 on("nextEpisodeBtn", "click", () => playEpisode(state.episodeIndex + 1));
 if (video) {
@@ -2022,8 +2038,7 @@ if (video) {
   video.addEventListener("pause", () => {
     $("playBtn").classList.remove("is-playing");
     $("playBtn").dataset.state = "paused";
-    setCenterStateIcon("centerState", "pause");
-    $("centerState").classList.remove("hidden");
+    $("centerState").classList.add("hidden");
   });
   video.addEventListener("waiting", () => $("loadingState").classList.remove("hidden"));
   video.addEventListener("playing", () => $("loadingState").classList.add("hidden"));
@@ -2169,12 +2184,11 @@ on("clearSkipBtn", "click", async () => {
 
 document.querySelector("#playerView .player-shell")?.addEventListener("click", (event) => {
   if (event.target.closest(".media-controls, .player-settings-popup, .volume-popup, button, input, select, textarea")) return;
-  const targetVideo = activeVideoForKind("vod");
-  const willPlay = targetVideo.paused;
-  willPlay ? targetVideo.play() : targetVideo.pause();
-  paintCenterState("centerState", willPlay ? "play" : "pause");
+  event.preventDefault();
+  event.stopPropagation();
+  toggleVodPlayback(true);
   showControls();
-});
+}, true);
 
 document.addEventListener("keydown", (event) => {
   if (event.target.matches("input, textarea, select")) return;
@@ -2186,7 +2200,7 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.code === "Space") {
     event.preventDefault();
-    activeVideo.paused ? activeVideo.play() : activeVideo.pause();
+    toggleVodPlayback(false);
   }
   if (event.key === "ArrowLeft") activeVideo.currentTime = Math.max(0, activeVideo.currentTime - 10);
   if (event.key === "ArrowRight") activeVideo.currentTime = Math.min(activeVideo.duration || 0, activeVideo.currentTime + 10);
