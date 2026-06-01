@@ -12,7 +12,6 @@
         <div id="titleText" class="brand">ePlayer</div>
         <nav>
           <button class="nav active" data-view="home">首页</button>
-          <button class="nav" data-view="live">直播</button>
           <button class="nav" data-view="player">播放</button>
         </nav>
         <div class="title-actions">
@@ -40,60 +39,82 @@
         </aside>
 
         <main>
-        <section id="homeView" class="view active">
-          <section class="content">
-            <div class="category-strip-wrap">
-              <div id="categoryList" class="category-strip"></div>
-            </div>
-            <div class="toolbar">
-              <div id="libraryInfo" class="muted"></div>
-            </div>
-            <div id="cards" class="cards"></div>
-            <div id="librarySentinel" class="library-sentinel hidden"></div>
+          <section id="homeView" class="view active">
+            <section class="content">
+              <div class="category-strip-wrap">
+                <div id="categoryList" class="category-strip"></div>
+              </div>
+              <div class="toolbar">
+                <div id="libraryInfo" class="muted"></div>
+              </div>
+              <div id="cards" class="cards"></div>
+              <div id="librarySentinel" class="library-sentinel hidden"></div>
+            </section>
           </section>
-        </section>
 
-        <section id="liveView" class="view live-view">
-          <section class="live-main">
-            <div class="player-shell live-player-shell">
-              <video id="liveVideo" playsinline></video>
-              <div id="liveCenterState" class="center-state hidden">播放</div>
-              <div id="liveControls" class="media-controls live-controls" data-controls-kind="live">
-                <div class="live-progress" aria-hidden="true"><span></span></div>
+          <section id="searchView" class="view search-view">
+            <div class="search-box">
+              <input id="searchInput" placeholder="搜索影片" />
+              <button id="searchBtn">搜索</button>
+            </div>
+            <div id="searchResults" class="cards"></div>
+          </section>
+
+          <section id="playerView" class="view player-view">
+            <div class="player-shell">
+              <div id="vodArtContainer" class="art-host"><video id="video" playsinline></video></div>
+              <div id="centerState" class="center-state hidden">播放</div>
+              <div id="loadingState" class="loading-state hidden">加载中</div>
+              <div class="media-controls vod-controls" data-controls-kind="vod">
+                <input id="seek" class="control-seek" type="range" min="0" max="1000" value="0" aria-label="播放进度" />
                 <div class="control-row">
                   <div class="control-left">
-                    <button id="livePlayBtn" class="control-icon play-toggle" aria-label="播放/暂停" title="播放/暂停" type="button"><span class="control-symbol play-symbol"></span></button>
+                    <button id="playBtn" class="control-icon play-toggle" aria-label="播放/暂停" title="播放/暂停" type="button"><span class="control-symbol play-symbol"></span></button>
+                    <button id="nextEpisodeBtn" class="control-icon next-toggle" aria-label="下一集" title="下一集" type="button"><span class="control-symbol next-symbol"></span></button>
                     <div class="volume-control">
-                      <button id="liveVolumeBtn" class="control-icon volume-toggle" aria-label="音量" title="音量" type="button">
+                      <button id="volumeBtn" class="control-icon volume-toggle" aria-label="音量" title="音量" type="button">
                         <svg class="control-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"></path><path d="M16 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 6a8 8 0 0 1 0 12"></path></svg>
                       </button>
-                      <div id="liveVolumePopup" class="volume-popup hidden">
-                        <div id="liveVolumeValue" class="volume-value">100</div>
-                        <input id="liveVolume" class="volume-slider" type="range" min="0" max="1" step="0.01" value="1" aria-label="直播音量" />
+                      <div id="volumePopup" class="volume-popup hidden">
+                        <div id="volumeValue" class="volume-value">100</div>
+                        <input id="volumeSlider" class="volume-slider" type="range" min="0" max="1" step="0.01" value="1" aria-label="音量" />
                       </div>
                     </div>
-                    <div id="liveNameText" class="control-time live-name">未选择频道 / 直播</div>
+                    <div id="timeText" class="control-time">00:00 / 00:00</div>
                   </div>
                   <div class="control-right">
                     <div class="player-settings">
-                      <button id="livePlayerSettingsBtn" class="control-icon settings-toggle" aria-label="设置" title="设置" type="button">
+                      <button id="playerSettingsBtn" class="control-icon settings-toggle" aria-label="设置" title="设置" type="button">
                         <svg class="control-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.67 4.14a2.34 2.34 0 0 1 4.66 0 2.34 2.34 0 0 0 3.32 1.91 2.34 2.34 0 0 1 2.33 4.04 2.34 2.34 0 0 0 0 3.82 2.34 2.34 0 0 1-2.33 4.04 2.34 2.34 0 0 0-3.32 1.91 2.34 2.34 0 0 1-4.66 0 2.34 2.34 0 0 0-3.32-1.91 2.34 2.34 0 0 1-2.33-4.04 2.34 2.34 0 0 0 0-3.82 2.34 2.34 0 0 1 2.33-4.04 2.34 2.34 0 0 0 3.32-1.91"></path><circle cx="12" cy="12" r="3"></circle></svg>
                       </button>
-                      <div id="livePlayerSettingsPopup" class="player-settings-popup hidden" data-settings-kind="live">
+                      <div id="playerSettingsPopup" class="player-settings-popup hidden" data-settings-kind="vod">
                         <div class="settings-page active" data-settings-page="main">
-                          <button class="settings-menu-row" data-player-settings-page="live-audio" type="button"><span>音量均衡</span><em id="liveAudioBalanceLabel">关闭</em><b>›</b></button>
-                          <button class="settings-menu-row" data-player-settings-page="live-enhance" type="button"><span>画质增强</span><em id="liveVideoEnhanceLabel">关闭</em><b>›</b></button>
-                          <button class="settings-menu-row" data-player-action="live-fill" type="button"><span>画面比例</span><em id="liveFillVideoLabel">原始</em></button>
-                          <button class="settings-menu-row" data-player-action="compact" type="button"><span>精简模式</span><em id="liveCompactLabel">开启</em></button>
-                          <button class="settings-menu-row" data-player-action="fullscreen" type="button"><span>窗口全屏</span><em id="liveFullscreenLabel">开启</em></button>
+                          <button class="settings-menu-row" data-player-settings-page="speed" type="button"><span>播放速度</span><em id="speedLabel">正常</em><b>›</b></button>
+                          <button class="settings-menu-row" data-player-settings-page="audio" type="button"><span>音量均衡</span><em id="audioBalanceLabel">关闭</em><b>›</b></button>
+                          <button class="settings-menu-row" data-player-settings-page="enhance" type="button"><span>画质增强</span><em id="videoEnhanceLabel">关闭</em><b>›</b></button>
+                          <button id="skipBtn" class="settings-menu-row" type="button"><span>跳过片头片尾</span><em>设置跳过配置</em></button>
+                          <button class="settings-menu-row" data-player-action="vod-fill" type="button"><span>画面比例</span><em id="fillVideoLabel">原始</em></button>
+                          <button class="settings-menu-row" data-player-action="compact" type="button"><span>精简模式</span><em id="compactLabel">开启</em></button>
+                          <button class="settings-menu-row" data-player-action="fullscreen" type="button"><span>窗口全屏</span><em id="fullscreenLabel">开启</em></button>
                         </div>
-                        <div class="settings-page" data-settings-page="live-audio">
+                        <div class="settings-page" data-settings-page="speed">
+                          <button class="settings-back" data-player-settings-back type="button">‹ 播放速度</button>
+                          <button class="choice-row" data-player-speed="0.5" type="button">0.5</button>
+                          <button class="choice-row" data-player-speed="0.8" type="button">0.8</button>
+                          <button class="choice-row active" data-player-speed="1" type="button">正常</button>
+                          <button class="choice-row" data-player-speed="1.25" type="button">1.3</button>
+                          <button class="choice-row" data-player-speed="1.5" type="button">1.5</button>
+                          <button class="choice-row" data-player-speed="2" type="button">2.0</button>
+                          <button class="choice-row" data-player-speed="3" type="button">3.0</button>
+                          <button class="choice-row" data-player-speed="4" type="button">4.0</button>
+                        </div>
+                        <div class="settings-page" data-settings-page="audio">
                           <button class="settings-back" data-player-settings-back type="button">‹ 音量均衡</button>
                           <button class="choice-row active" data-audio-balance="off" type="button">关闭</button>
                           <button class="choice-row" data-audio-balance="standard" type="button">标准</button>
                           <button class="choice-row" data-audio-balance="strong" type="button">强</button>
                         </div>
-                        <div class="settings-page" data-settings-page="live-enhance">
+                        <div class="settings-page" data-settings-page="enhance">
                           <button class="settings-back" data-player-settings-back type="button">‹ 画质增强</button>
                           <button class="choice-row active" data-video-enhance="off" type="button">关闭</button>
                           <button class="choice-row" data-video-enhance="standard" type="button">标准</button>
@@ -101,130 +122,32 @@
                         </div>
                       </div>
                     </div>
-                    <button id="liveCompactBtn" class="control-icon compact-toggle" aria-label="精简模式" title="精简模式" type="button"><span class="control-symbol compact-symbol"></span></button>
-                    <button id="liveFullscreenBtn" class="control-icon fullscreen-toggle" aria-label="全屏" title="全屏" type="button"><span class="control-symbol fullscreen-symbol"></span></button>
+                    <button id="compactBtn" class="control-icon compact-toggle" aria-label="精简模式" title="精简模式" type="button"><span class="control-symbol compact-symbol"></span></button>
+                    <button id="fullscreenBtn" class="control-icon fullscreen-toggle" aria-label="全屏" title="全屏" type="button"><span class="control-symbol fullscreen-symbol"></span></button>
                   </div>
                 </div>
               </div>
-              <button id="liveSideToggle" class="side-toggle" title="频道">‹</button>
+              <button id="playSideToggle" class="side-toggle" title="详情">‹</button>
             </div>
+            <aside id="playSide" class="play-side drawer-side">
+              <div class="side-tabs">
+                <button class="side-tab active" data-play-tab="episodes" type="button">选集</button>
+                <button class="side-tab" data-play-tab="sources" type="button">换源</button>
+                <button class="side-tab" data-play-tab="intro" type="button">简介</button>
+              </div>
+              <section id="episodesPanel" class="play-side-panel active">
+                <div id="episodeHeader" class="episode-header"></div>
+                <div id="episodeList" class="episode-list"></div>
+              </section>
+              <section id="sourcesPanel" class="play-side-panel">
+                <div id="sourceCandidateStatus" class="muted">打开剧集后自动搜索可用来源。</div>
+                <div id="sourceCandidateList" class="source-candidates"></div>
+              </section>
+              <section id="introPanel" class="play-side-panel">
+                <div id="detailBox" class="detail-box"></div>
+              </section>
+            </aside>
           </section>
-          <aside id="liveSide" class="live-side drawer-side open">
-            <div class="side-tabs two">
-              <button class="side-tab active" data-live-tab="channels" type="button">频道</button>
-              <button class="side-tab" data-live-tab="sources" type="button">直播源</button>
-            </div>
-            <section id="liveChannelsPanel" class="live-side-panel active">
-              <input id="liveSearchInput" class="side-search" placeholder="搜索频道" />
-              <div id="liveGroups" class="live-groups"></div>
-              <div id="liveChannels" class="live-channels"></div>
-            </section>
-            <section id="liveSourcesPanel" class="live-side-panel">
-              <div class="live-source-toolbar">
-                <span id="liveSourceCount" class="muted">0 个源</span>
-                <button id="liveSettingsBtn" type="button">设置</button>
-              </div>
-              <div id="liveSourceListPanel" class="live-source-list"></div>
-            </section>
-          </aside>
-        </section>
-
-        <section id="searchView" class="view search-view">
-          <div class="search-box">
-            <input id="searchInput" placeholder="搜索影片" />
-            <button id="searchBtn">搜索</button>
-          </div>
-          <div id="searchResults" class="cards"></div>
-        </section>
-
-        <section id="playerView" class="view player-view">
-          <div class="player-shell">
-            <video id="video" playsinline></video>
-            <div id="centerState" class="center-state hidden">播放</div>
-            <div id="loadingState" class="loading-state hidden">加载中</div>
-            <div class="media-controls vod-controls" data-controls-kind="vod">
-              <input id="seek" class="control-seek" type="range" min="0" max="1000" value="0" aria-label="播放进度" />
-              <div class="control-row">
-                <div class="control-left">
-                  <button id="playBtn" class="control-icon play-toggle" aria-label="播放/暂停" title="播放/暂停" type="button"><span class="control-symbol play-symbol"></span></button>
-                  <button id="nextEpisodeBtn" class="control-icon next-toggle" aria-label="下一集" title="下一集" type="button"><span class="control-symbol next-symbol"></span></button>
-                  <div class="volume-control">
-                    <button id="volumeBtn" class="control-icon volume-toggle" aria-label="音量" title="音量" type="button">
-                      <svg class="control-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"></path><path d="M16 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 6a8 8 0 0 1 0 12"></path></svg>
-                    </button>
-                    <div id="volumePopup" class="volume-popup hidden">
-                      <div id="volumeValue" class="volume-value">100</div>
-                      <input id="volumeSlider" class="volume-slider" type="range" min="0" max="1" step="0.01" value="1" aria-label="音量" />
-                    </div>
-                  </div>
-                  <div id="timeText" class="control-time">00:00 / 00:00</div>
-                </div>
-                <div class="control-right">
-                  <div class="player-settings">
-                    <button id="playerSettingsBtn" class="control-icon settings-toggle" aria-label="设置" title="设置" type="button">
-                      <svg class="control-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.67 4.14a2.34 2.34 0 0 1 4.66 0 2.34 2.34 0 0 0 3.32 1.91 2.34 2.34 0 0 1 2.33 4.04 2.34 2.34 0 0 0 0 3.82 2.34 2.34 0 0 1-2.33 4.04 2.34 2.34 0 0 0-3.32 1.91 2.34 2.34 0 0 1-4.66 0 2.34 2.34 0 0 0-3.32-1.91 2.34 2.34 0 0 1-2.33-4.04 2.34 2.34 0 0 0 0-3.82 2.34 2.34 0 0 1 2.33-4.04 2.34 2.34 0 0 0 3.32-1.91"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                    </button>
-                    <div id="playerSettingsPopup" class="player-settings-popup hidden" data-settings-kind="vod">
-                      <div class="settings-page active" data-settings-page="main">
-                        <button class="settings-menu-row" data-player-settings-page="speed" type="button"><span>播放速度</span><em id="speedLabel">正常</em><b>›</b></button>
-                        <button class="settings-menu-row" data-player-settings-page="audio" type="button"><span>音量均衡</span><em id="audioBalanceLabel">关闭</em><b>›</b></button>
-                        <button class="settings-menu-row" data-player-settings-page="enhance" type="button"><span>画质增强</span><em id="videoEnhanceLabel">关闭</em><b>›</b></button>
-                        <button id="skipBtn" class="settings-menu-row" type="button"><span>跳过片头片尾</span><em>设置跳过配置</em></button>
-                        <button class="settings-menu-row" data-player-action="vod-fill" type="button"><span>画面比例</span><em id="fillVideoLabel">原始</em></button>
-                        <button class="settings-menu-row" data-player-action="compact" type="button"><span>精简模式</span><em id="compactLabel">开启</em></button>
-                        <button class="settings-menu-row" data-player-action="fullscreen" type="button"><span>窗口全屏</span><em id="fullscreenLabel">开启</em></button>
-                      </div>
-                      <div class="settings-page" data-settings-page="speed">
-                        <button class="settings-back" data-player-settings-back type="button">‹ 播放速度</button>
-                        <button class="choice-row" data-player-speed="0.5" type="button">0.5</button>
-                        <button class="choice-row" data-player-speed="0.8" type="button">0.8</button>
-                        <button class="choice-row active" data-player-speed="1" type="button">正常</button>
-                        <button class="choice-row" data-player-speed="1.25" type="button">1.3</button>
-                        <button class="choice-row" data-player-speed="1.5" type="button">1.5</button>
-                        <button class="choice-row" data-player-speed="2" type="button">2.0</button>
-                        <button class="choice-row" data-player-speed="3" type="button">3.0</button>
-                        <button class="choice-row" data-player-speed="4" type="button">4.0</button>
-                      </div>
-                      <div class="settings-page" data-settings-page="audio">
-                        <button class="settings-back" data-player-settings-back type="button">‹ 音量均衡</button>
-                        <button class="choice-row active" data-audio-balance="off" type="button">关闭</button>
-                        <button class="choice-row" data-audio-balance="standard" type="button">标准</button>
-                        <button class="choice-row" data-audio-balance="strong" type="button">强</button>
-                      </div>
-                      <div class="settings-page" data-settings-page="enhance">
-                        <button class="settings-back" data-player-settings-back type="button">‹ 画质增强</button>
-                        <button class="choice-row active" data-video-enhance="off" type="button">关闭</button>
-                        <button class="choice-row" data-video-enhance="standard" type="button">标准</button>
-                        <button class="choice-row" data-video-enhance="clear" type="button">清晰</button>
-                      </div>
-                    </div>
-                  </div>
-                  <button id="compactBtn" class="control-icon compact-toggle" aria-label="精简模式" title="精简模式" type="button"><span class="control-symbol compact-symbol"></span></button>
-                  <button id="fullscreenBtn" class="control-icon fullscreen-toggle" aria-label="全屏" title="全屏" type="button"><span class="control-symbol fullscreen-symbol"></span></button>
-                </div>
-              </div>
-            </div>
-            <button id="playSideToggle" class="side-toggle" title="详情">‹</button>
-          </div>
-          <aside id="playSide" class="play-side drawer-side">
-            <div class="side-tabs">
-              <button class="side-tab active" data-play-tab="episodes" type="button">选集</button>
-              <button class="side-tab" data-play-tab="sources" type="button">换源</button>
-              <button class="side-tab" data-play-tab="intro" type="button">简介</button>
-            </div>
-            <section id="episodesPanel" class="play-side-panel active">
-              <div id="episodeHeader" class="episode-header"></div>
-              <div id="episodeList" class="episode-list"></div>
-            </section>
-            <section id="sourcesPanel" class="play-side-panel">
-              <div id="sourceCandidateStatus" class="muted">打开剧集后自动搜索可用来源。</div>
-              <div id="sourceCandidateList" class="source-candidates"></div>
-            </section>
-            <section id="introPanel" class="play-side-panel">
-              <div id="detailBox" class="detail-box"></div>
-            </section>
-          </aside>
-        </section>
         </main>
       </div>
     </div>
@@ -238,7 +161,6 @@
         </header>
         <nav class="settings-tabs" aria-label="设置分类">
           <button class="settings-tab active" data-settings-tab="vod" type="button">点播资源</button>
-          <button class="settings-tab" data-settings-tab="live" type="button">直播资源</button>
           <button class="settings-tab" data-settings-tab="about" type="button">关于</button>
         </nav>
         <section id="vodSettings" class="settings-panel active">
@@ -253,18 +175,6 @@
           </div>
           <div id="sourceList" class="settings-source-list"></div>
         </section>
-        <section id="liveSettings" class="settings-panel">
-          <h3>直播资源</h3>
-          <div class="settings-toolbar">
-            <label class="settings-default-row">
-              <span>默认源</span>
-              <select id="settingsLiveSourceSelect"></select>
-            </label>
-            <button id="addLiveSourceBtn" data-settings-action="addLiveSource" type="button">新增直播源</button>
-            <button id="openLiveImportBtn" data-settings-action="openLiveImport" type="button">批量导入</button>
-          </div>
-          <div id="liveSourceList" class="settings-source-list"></div>
-        </section>
         <section id="aboutSettings" class="settings-panel">
           <h3>关于</h3>
           <div class="settings-card">
@@ -274,7 +184,6 @@
           <div class="settings-card">
             <div class="about-row"><span>播放内核</span><strong>hls.js / HTML5 video</strong></div>
             <div class="about-row"><span>点播配置</span><strong>用户数据目录 sources.json</strong></div>
-            <div class="about-row"><span>直播配置</span><strong>用户数据目录 live-sources.json</strong></div>
           </div>
         </section>
         <footer class="settings-footer">
@@ -300,21 +209,6 @@
       </section>
     </div>
 
-    <div id="liveSourceImportDialog" class="modal hidden" role="dialog" aria-modal="true">
-      <div class="modal-backdrop" data-close-modal="liveSourceImport"></div>
-      <section class="modal-panel import-modal-panel">
-        <header class="settings-header">
-          <h2>批量导入直播资源</h2>
-          <button id="closeLiveSourceImportBtn" class="settings-icon-btn" data-settings-action="closeLiveSourceImport" type="button">×</button>
-        </header>
-        <textarea id="liveSourceImport" spellcheck="false" placeholder="粘贴 live-sources.json 全文"></textarea>
-        <footer class="import-footer">
-          <button id="cancelLiveSourceImportBtn" data-settings-action="closeLiveSourceImport" type="button">取消</button>
-          <button id="importLiveBtn" class="primary" data-settings-action="importLiveSource" type="button">应用</button>
-        </footer>
-      </section>
-    </div>
-
     <div id="historyPopup" class="history-popup hidden">
       <div class="history-popup-head">
         <strong>播放历史</strong>
@@ -329,19 +223,21 @@
       <section class="skip-dialog-body">
         <h3>跳过配置</h3>
         <p>设置后，到达时间会自动跳过或进入下一集</p>
-      <div class="skip-form">
+        <div class="skip-form">
           <label><span>片头时间</span><input id="introInput" type="number" min="0" value="0" /><em>秒</em><button id="introCurrentBtn" type="button">当前</button></label>
           <label><span>片尾时间</span><input id="outroInput" type="number" min="0" value="0" /><em>秒</em><button id="outroCurrentBtn" type="button">当前</button></label>
-      </div>
+        </div>
         <label class="skip-enable"><input id="skipEnabledInput" type="checkbox" checked />启用自动跳过 <span>片头会跳到指定秒数，片尾按剩余秒数自动下一集</span></label>
-      <div class="dialog-actions">
+        <div class="dialog-actions">
           <form method="dialog"><button id="cancelSkipBtn" type="submit">取消</button></form>
           <button id="clearSkipBtn" type="button">清除</button>
           <button id="saveSkipBtn" type="button">保存</button>
-      </div>
+        </div>
       </section>
     </dialog>
 
+    <script src="/artplayer.js?v=20260531-settings2"></script>
+    <script src="/flv.min.js?v=20260531-settings2"></script>
     <script src="/app.js?v=20260531-settings2"></script>
-</body>
+  </body>
 </html>

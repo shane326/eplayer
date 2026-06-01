@@ -1,8 +1,7 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cms;
 mod config;
-mod live;
 mod model;
 mod paths;
 mod proxy;
@@ -21,7 +20,7 @@ use std::sync::Arc;
 use tao::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
-use tao::window::{CursorIcon, Fullscreen, ResizeDirection, Window, WindowBuilder};
+use tao::window::{CursorIcon, Fullscreen, Icon, ResizeDirection, Window, WindowBuilder};
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use wry::{WebViewBuilder, http::Request};
@@ -34,6 +33,7 @@ enum UserEvent {
     ToggleCompact,
     DragWindow,
     CloseWindow,
+    SetTitle(String),
     MouseDown(i32, i32),
     MouseMove(i32, i32),
 }
@@ -87,11 +87,9 @@ impl HitTestResult {
 #[derive(Clone)]
 struct AppState {
     cms: cms::CmsClient,
-    live_client: live::LiveClient,
     storage: storage::Storage,
     proxy: Option<proxy::ProxyServer>,
     config_path: std::path::PathBuf,
-    live_config_path: std::path::PathBuf,
     cache_time: u64,
 }
 
@@ -154,12 +152,6 @@ struct SaveSourcesRequest {
 }
 
 #[derive(Debug, Deserialize)]
-struct SaveLiveSourcesRequest {
-    sources: Vec<live::LiveSource>,
-    default_source: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct SkipQuery {
     source: String,
     id: String,
@@ -174,55 +166,28 @@ struct SaveSkipRequest {
     enabled: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
-struct LiveChannelsQuery {
-    source: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ImportLiveSourcesRequest {
-    text: String,
-}
-
 #[derive(Debug, Serialize)]
 struct AppBootstrap {
     sources: Vec<Source>,
     selected_source: String,
 }
 
-#[derive(Debug, Serialize)]
-struct LiveBootstrap {
-    sources: Vec<live::LiveSource>,
-    selected_source: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ImportLiveResult {
-    count: usize,
-    sources: Vec<live::LiveSource>,
-}
-
 fn main() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .context("build tokio runtime")?;
+        .context("no available vod source")?;
 
     let config_path = config::default_config_path();
     let source_config = config::load_config(&config_path)?;
-    let live_config_path = live::default_live_config_path();
-    let _ = live::load_live_config(&live_config_path)?;
     let cms = cms::CmsClient::new()?;
-    let live_client = live::LiveClient::new();
     let storage = storage::Storage::open(&storage::default_db_path())?;
     let proxy = runtime.block_on(proxy::ProxyServer::start()).ok();
     let state = AppState {
         cms,
-        live_client,
         storage,
         proxy,
         config_path,
-        live_config_path,
         cache_time: source_config.cache_time,
     };
     let app_url = runtime.block_on(start_app_server(state))?;
@@ -238,7 +203,9 @@ async fn start_app_server(state: AppState) -> Result<String> {
         .route("/", get(index))
         .route("/app.js", get(app_js))
         .route("/styles.css", get(styles_css))
+        .route("/artplayer.js", get(artplayer_js))
         .route("/hls.min.js", get(hls_js))
+        .route("/flv.min.js", get(flv_js))
         .route("/api/bootstrap", get(api_bootstrap))
         .route("/api/sources/import", post(api_import_sources))
         .route("/api/sources/save", post(api_save_sources))
@@ -255,14 +222,6 @@ async fn start_app_server(state: AppState) -> Result<String> {
         .route("/api/history/lookup", get(api_history_lookup))
         .route("/api/history/clear", post(api_clear_history))
         .route("/api/skip", get(api_get_skip).post(api_save_skip))
-        .route("/api/live/bootstrap", get(api_live_bootstrap))
-        .route("/api/live/sources/import", post(api_import_live_sources))
-        .route("/api/live/sources/save", post(api_save_live_sources))
-        .route(
-            "/api/live/settings/default-source",
-            post(api_save_default_live_source),
-        )
-        .route("/api/live/channels", get(api_live_channels))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -280,10 +239,11 @@ fn run_webview(app_url: &str) -> Result<()> {
         .with_title("ePlayer")
         .with_inner_size(LogicalSize::new(1280.0, 820.0))
         .with_min_inner_size(LogicalSize::new(960.0, 640.0))
+        .with_window_icon(Some(app_icon()?))
         .with_decorations(false)
         .with_resizable(true)
         .build(&event_loop)
-        .context("create window")?;
+        .context("no available vod source")?;
 
     let mut compact_mode = false;
     let mut compact_restore_size: Option<PhysicalSize<u32>> = None;
@@ -298,6 +258,10 @@ fn run_webview(app_url: &str) -> Result<()> {
         }
         if let Some(message) = body.strip_prefix("client_error:") {
             eprintln!("webview error: {message}");
+            return;
+        }
+        if let Some(title) = body.strip_prefix("set_title:") {
+            let _ = proxy.send_event(UserEvent::SetTitle(title.trim().to_string()));
             return;
         }
         let mut parts = body.split([':', ',']);
@@ -343,7 +307,7 @@ fn run_webview(app_url: &str) -> Result<()> {
         .with_ipc_handler(handler)
         .with_accept_first_mouse(true)
         .build(&window)
-        .context("create webview")?;
+        .context("no available vod source")?;
 
     let mut webview = Some(webview);
     event_loop.run(move |event, _, control_flow| {
@@ -357,6 +321,13 @@ fn run_webview(app_url: &str) -> Result<()> {
             | Event::UserEvent(UserEvent::CloseWindow) => {
                 let _ = webview.take();
                 *control_flow = ControlFlow::Exit;
+            }
+            Event::UserEvent(UserEvent::SetTitle(title)) => {
+                if title.trim().is_empty() {
+                    window.set_title("ePlayer");
+                } else {
+                    window.set_title(&title);
+                }
             }
             Event::UserEvent(UserEvent::Minimize) => window.set_minimized(true),
             Event::UserEvent(UserEvent::Maximize) => window.set_maximized(!window.is_maximized()),
@@ -434,6 +405,57 @@ fn run_webview(app_url: &str) -> Result<()> {
     });
 }
 
+fn app_icon() -> Result<Icon> {
+    const SIZE: u32 = 64;
+    let mut rgba = vec![0_u8; (SIZE * SIZE * 4) as usize];
+    let center = (SIZE as f32 - 1.0) / 2.0;
+    let radius = 28.0_f32;
+
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let dx = x as f32 - center;
+            let dy = y as f32 - center;
+            let distance = (dx * dx + dy * dy).sqrt();
+            let index = ((y * SIZE + x) * 4) as usize;
+
+            if distance <= radius {
+                rgba[index] = 18;
+                rgba[index + 1] = 24;
+                rgba[index + 2] = 36;
+                rgba[index + 3] = 255;
+            }
+
+            if is_play_triangle(x as f32, y as f32) {
+                rgba[index] = 57;
+                rgba[index + 1] = 226;
+                rgba[index + 2] = 188;
+                rgba[index + 3] = 255;
+            }
+        }
+    }
+
+    Icon::from_rgba(rgba, SIZE, SIZE).context("no available vod source")
+}
+
+fn is_play_triangle(x: f32, y: f32) -> bool {
+    let ax = 26.0;
+    let ay = 20.0;
+    let bx = 26.0;
+    let by = 44.0;
+    let cx = 46.0;
+    let cy = 32.0;
+
+    let area = edge(ax, ay, bx, by, cx, cy).abs();
+    let a = edge(x, y, bx, by, cx, cy).abs();
+    let b = edge(ax, ay, x, y, cx, cy).abs();
+    let c = edge(ax, ay, bx, by, x, y).abs();
+    (a + b + c - area).abs() <= 0.8
+}
+
+fn edge(ax: f32, ay: f32, bx: f32, by: f32, cx: f32, cy: f32) -> f32 {
+    (cx - ax) * (by - ay) - (cy - ay) * (bx - ax)
+}
+
 fn hit_test(window_size: PhysicalSize<u32>, x: i32, y: i32, scale: f64) -> HitTestResult {
     const BORDERLESS_RESIZE_INSET: f64 = 5.0;
 
@@ -501,6 +523,17 @@ async fn styles_css() -> Response {
         .into_response()
 }
 
+async fn artplayer_js() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/artplayer.js"),
+    )
+        .into_response()
+}
+
 async fn hls_js() -> Response {
     (
         [(
@@ -508,6 +541,17 @@ async fn hls_js() -> Response {
             "application/javascript; charset=utf-8",
         )],
         include_str!("../assets/hls.min.js"),
+    )
+        .into_response()
+}
+
+async fn flv_js() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../assets/flv.min.js"),
     )
         .into_response()
 }
@@ -526,28 +570,6 @@ async fn api_bootstrap(State(state): State<Arc<AppState>>) -> Result<Json<AppBoo
     }))
 }
 
-async fn api_live_bootstrap(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<LiveBootstrap>, AppError> {
-    let sources = live::load_live_sources(&state.live_config_path)?;
-    let selected_source = state
-        .storage
-        .get_setting("default_live_source")?
-        .filter(|key| sources.iter().any(|source| source.key == *key))
-        .or_else(|| {
-            sources
-                .iter()
-                .find(|source| source.enabled)
-                .or_else(|| sources.first())
-                .map(|source| source.key.clone())
-        })
-        .unwrap_or_default();
-    Ok(Json(LiveBootstrap {
-        sources,
-        selected_source,
-    }))
-}
-
 async fn api_import_sources(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ImportSourcesRequest>,
@@ -558,32 +580,6 @@ async fn api_import_sources(
     std::fs::write(&state.config_path, payload.text)
         .with_context(|| format!("write {}", state.config_path.display()))?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-async fn api_import_live_sources(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<ImportLiveSourcesRequest>,
-) -> Result<Json<ImportLiveResult>, AppError> {
-    let parsed: live::LiveConfigFile = serde_json::from_str(&payload.text)?;
-    let imported = parsed
-        .lives
-        .into_iter()
-        .map(|(key, entry)| live::LiveSource {
-            key,
-            name: entry.name,
-            url: entry.url,
-            ua: entry.ua.filter(|value| !value.trim().is_empty()),
-            epg: entry.epg.filter(|value| !value.trim().is_empty()),
-            enabled: entry.enabled.unwrap_or(true),
-        })
-        .collect::<Vec<_>>();
-    let mut merged = live::load_live_sources(&state.live_config_path)?;
-    merge_live_sources(&mut merged, imported);
-    live::save_live_sources(&state.live_config_path, &merged)?;
-    Ok(Json(ImportLiveResult {
-        count: merged.len(),
-        sources: merged,
-    }))
 }
 
 async fn api_save_sources(
@@ -604,23 +600,6 @@ async fn api_save_sources(
     }))
 }
 
-async fn api_save_live_sources(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<SaveLiveSourcesRequest>,
-) -> Result<Json<LiveBootstrap>, AppError> {
-    let sources = normalize_live_sources(payload.sources);
-    let default_source = normalize_source_key(&payload.default_source);
-    validate_live_sources(&sources, &default_source)?;
-    live::save_live_sources(&state.live_config_path, &sources)?;
-    state
-        .storage
-        .save_setting("default_live_source", &default_source)?;
-    Ok(Json(LiveBootstrap {
-        sources,
-        selected_source: default_source,
-    }))
-}
-
 async fn api_save_default_source(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SaveDefaultSourceRequest>,
@@ -628,16 +607,6 @@ async fn api_save_default_source(
     state
         .storage
         .save_setting("default_source", payload.source.trim())?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn api_save_default_live_source(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<SaveDefaultSourceRequest>,
-) -> Result<StatusCode, AppError> {
-    state
-        .storage
-        .save_setting("default_live_source", payload.source.trim())?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -689,7 +658,8 @@ async fn api_play_url(
     State(state): State<Arc<AppState>>,
     Query(query): Query<PlayUrlQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let url = if query.url.to_ascii_lowercase().contains(".m3u8") {
+    let lower = query.url.to_ascii_lowercase();
+    let url = if lower.contains(".m3u8") || lower.contains("/m3u8") {
         state
             .proxy
             .as_ref()
@@ -699,15 +669,6 @@ async fn api_play_url(
         query.url
     };
     Ok(Json(serde_json::json!({ "url": url })))
-}
-
-async fn api_live_channels(
-    State(state): State<Arc<AppState>>,
-    Query(query): Query<LiveChannelsQuery>,
-) -> Result<Json<live::LivePlaylist>, AppError> {
-    let sources = live::load_live_sources(&state.live_config_path)?;
-    let source = find_live_source(&sources, query.source.as_deref())?;
-    Ok(Json(state.live_client.channels(&source).await?))
 }
 
 async fn api_history(
@@ -790,38 +751,7 @@ fn find_source(sources: &[Source], key: Option<&str>) -> Result<Source> {
         .iter()
         .find(|source| source.enabled)
         .cloned()
-        .context("没有可用点播源")
-}
-
-fn find_live_source(sources: &[live::LiveSource], key: Option<&str>) -> Result<live::LiveSource> {
-    if let Some(key) = key.filter(|key| !key.is_empty()) {
-        if let Some(source) = sources.iter().find(|source| source.key == key) {
-            return Ok(source.clone());
-        }
-    }
-    sources
-        .iter()
-        .find(|source| source.enabled)
-        .or_else(|| sources.first())
-        .cloned()
-        .context("没有可用直播源")
-}
-
-fn merge_live_sources(existing: &mut Vec<live::LiveSource>, imported: Vec<live::LiveSource>) {
-    for source in imported {
-        if source.key.trim().is_empty()
-            || source.name.trim().is_empty()
-            || source.url.trim().is_empty()
-        {
-            continue;
-        }
-        if let Some(current) = existing.iter_mut().find(|item| item.key == source.key) {
-            *current = source;
-        } else {
-            existing.push(source);
-        }
-    }
-    existing.sort_by(|a, b| a.name.cmp(&b.name));
+        .context("no available vod source")
 }
 
 fn normalize_source_key(value: &str) -> String {
@@ -851,68 +781,25 @@ fn normalize_sources(sources: Vec<Source>) -> Vec<Source> {
         .collect()
 }
 
-fn normalize_live_sources(sources: Vec<live::LiveSource>) -> Vec<live::LiveSource> {
-    sources
-        .into_iter()
-        .map(|source| live::LiveSource {
-            key: normalize_source_key(&source.key),
-            name: source.name.trim().to_string(),
-            url: source.url.trim().to_string(),
-            ua: source
-                .ua
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
-            epg: source
-                .epg
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
-            enabled: source.enabled,
-        })
-        .filter(|source| {
-            !source.key.is_empty() && !source.name.is_empty() && !source.url.is_empty()
-        })
-        .collect()
-}
-
 fn validate_sources(sources: &[Source], default_source: &str) -> Result<(), AppError> {
     if sources.is_empty() {
-        return Err(AppError(anyhow::anyhow!("至少需要保留一个点播源")));
+        return Err(AppError(anyhow::anyhow!(
+            "at least one vod source is required"
+        )));
     }
     let default_source = default_source.trim();
     let mut keys = std::collections::HashSet::new();
     for source in sources {
         if !keys.insert(source.key.as_str()) {
             return Err(AppError(anyhow::anyhow!(
-                "点播源标识重复：{}",
-                source.key
+                "duplicate vod source key: {}", source.key
             )));
         }
     }
     if !sources.iter().any(|source| source.key == default_source) {
-        return Err(AppError(anyhow::anyhow!("请选择有效默认点播源")));
-    }
-    Ok(())
-}
-
-fn validate_live_sources(
-    sources: &[live::LiveSource],
-    default_source: &str,
-) -> Result<(), AppError> {
-    if sources.is_empty() {
-        return Err(AppError(anyhow::anyhow!("至少需要保留一个直播源")));
-    }
-    let default_source = default_source.trim();
-    let mut keys = std::collections::HashSet::new();
-    for source in sources {
-        if !keys.insert(source.key.as_str()) {
-            return Err(AppError(anyhow::anyhow!(
-                "直播源标识重复：{}",
-                source.key
-            )));
-        }
-    }
-    if !sources.iter().any(|source| source.key == default_source) {
-        return Err(AppError(anyhow::anyhow!("请选择有效默认直播源")));
+        return Err(AppError(anyhow::anyhow!(
+            "please select a valid default vod source"
+        )));
     }
     Ok(())
 }

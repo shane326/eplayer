@@ -11,23 +11,15 @@ const state = {
   current: null,
   episodeIndex: 0,
   vodHls: null,
-  liveSources: [],
-  liveSource: "",
-  liveChannels: [],
-  liveGroup: "",
-  liveCurrent: null,
-  liveHls: null,
+  vodFlv: null,
+  vodArt: null,
   skip: { intro: 0, outro: 0, enabled: true },
   pendingStart: 0,
   playSideOpen: true,
-  liveSideOpen: true,
   settingsSection: "vod",
   settingsSources: [],
-  settingsLiveSources: [],
   settingsSource: "",
-  settingsLiveSource: "",
   settingsSelectedSource: "",
-  settingsSelectedLiveSource: "",
   historyOpen: false,
   playTab: "episodes",
   sourceCandidates: [],
@@ -35,24 +27,17 @@ const state = {
   sourceSpeeds: {},
   sourceSpeedTesting: new Set(),
   sourceSpeedQueueId: 0,
-  liveTab: "channels",
   playerSettingsOpen: false,
-  livePlayerSettingsOpen: false,
   volumeOpen: false,
-  liveVolumeOpen: false,
   audioBalance: "off",
-  liveAudioBalance: "off",
   videoEnhance: "off",
-  liveVideoEnhance: "off",
+  playbackRate: 1,
   fillVod: false,
-  fillLive: false,
   compactMode: false,
   fullscreenMode: false,
   compactRestoreView: "home",
   compactRestorePlaySide: true,
-  compactRestoreLiveSide: true,
   fullscreenRestorePlaySide: true,
-  fullscreenRestoreLiveSide: true,
   hideControlsTimer: null,
 };
 
@@ -81,7 +66,6 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 const video = $("video");
-const liveVideo = $("liveVideo");
 
 function on(id, eventName, handler) {
   const element = $(id);
@@ -92,6 +76,66 @@ function ipc(message) {
   if (window.ipc && window.ipc.postMessage) {
     window.ipc.postMessage(message);
   }
+}
+
+function clientLog(label, data = {}) {
+  try {
+    ipc(`client_log:${label} ${JSON.stringify(data)}`);
+  } catch {
+    ipc(`client_log:${label}`);
+  }
+}
+
+function describeElement(element) {
+  if (!element) return "";
+  const id = element.id ? `#${element.id}` : "";
+  const classes = typeof element.className === "string" && element.className.trim()
+    ? `.${element.className.trim().replace(/\s+/g, ".")}`
+    : "";
+  return `${element.tagName ? element.tagName.toLowerCase() : "node"}${id}${classes}`;
+}
+
+function videoDebugState(targetVideo, centerStateId) {
+  if (!targetVideo) return {};
+  const rect = targetVideo.getBoundingClientRect();
+  const style = getComputedStyle(targetVideo);
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const topElement = rect.width > 0 && rect.height > 0 ? document.elementFromPoint(cx, cy) : null;
+  const center = $(centerStateId);
+  const centerStyle = center ? getComputedStyle(center) : null;
+  return {
+    videoWidth: targetVideo.videoWidth,
+    videoHeight: targetVideo.videoHeight,
+    readyState: targetVideo.readyState,
+    networkState: targetVideo.networkState,
+    paused: targetVideo.paused,
+    currentTime: Number(targetVideo.currentTime || 0).toFixed(2),
+    src: targetVideo.currentSrc || targetVideo.src || "",
+    rect: {
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    },
+    style: {
+      display: style.display,
+      visibility: style.visibility,
+      opacity: style.opacity,
+      position: style.position,
+      zIndex: style.zIndex,
+      objectFit: style.objectFit,
+    },
+    topElement: describeElement(topElement),
+    centerState: center
+      ? {
+          hidden: center.classList.contains("hidden"),
+          classes: center.className,
+          text: (center.textContent || "").trim(),
+          display: centerStyle ? centerStyle.display : "",
+        }
+      : null,
+  };
 }
 
 async function api(path, options) {
@@ -172,23 +216,11 @@ async function openSettings() {
         state.source = data.selected_source || firstKey(state.sources);
       }
     }
-    if (!state.liveSources.length) {
-      const data = await api("/api/live/bootstrap").catch(() => null);
-      if (data) {
-        state.liveSources = data.sources || [];
-        state.liveSource = data.selected_source || firstKey(state.liveSources);
-      }
-    }
     state.settingsSources = cloneJson(state.sources);
-    state.settingsLiveSources = cloneJson(state.liveSources);
     state.settingsSource = state.source || firstKey(state.settingsSources);
-    state.settingsLiveSource = state.liveSource || firstKey(state.settingsLiveSources);
     state.settingsSelectedSource = firstKey(state.settingsSources);
-    state.settingsSelectedLiveSource = firstKey(state.settingsLiveSources);
     $("sourceImport").value = "";
-    $("liveSourceImport").value = "";
     renderSettingsSources();
-    renderSettingsLiveSources();
     setSettingsSection("vod");
     setSettingsMessage("");
   } catch (error) {
@@ -229,18 +261,11 @@ function startTitleDrag(event) {
 
 function renderSettingsSourceOptions() {
   const sourceSelect = $("settingsSourceSelect");
-  const liveSelect = $("settingsLiveSourceSelect");
   if (sourceSelect) {
     sourceSelect.innerHTML = state.settingsSources
       .map((source) => `<option value="${escapeAttr(source.key)}">${escapeHtml(source.name)}</option>`)
       .join("");
     sourceSelect.value = state.settingsSource;
-  }
-  if (liveSelect) {
-    liveSelect.innerHTML = state.settingsLiveSources
-      .map((source) => `<option value="${escapeAttr(source.key)}">${escapeHtml(source.name)}</option>`)
-      .join("");
-    liveSelect.value = state.settingsLiveSource;
   }
 }
 
@@ -251,15 +276,6 @@ function renderSettingsSources() {
   list.innerHTML = state.settingsSources
     .map((source) => settingsSourceRow(source, source.key === state.settingsSelectedSource))
     .join("") || `<div class="settings-empty">暂无点播源，点击上方新增资源。</div>`;
-}
-
-function renderSettingsLiveSources() {
-  renderSettingsSourceOptions();
-  const list = $("liveSourceList");
-  if (!list) return;
-  list.innerHTML = state.settingsLiveSources
-    .map((source) => settingsLiveSourceRow(source, source.key === state.settingsSelectedLiveSource))
-    .join("") || `<div class="settings-empty">暂无直播源，点击上方新增直播源。</div>`;
 }
 
 function settingsSourceRow(source, expanded) {
@@ -280,31 +296,6 @@ function settingsSourceRow(source, expanded) {
           ${settingsCheck("启用", "enabled", source.enabled)}
           <div class="settings-editor-actions">
             <button type="button" class="danger" data-delete-settings-source="${escapeAttr(source.key)}">删除</button>
-          </div>
-        </div>` : ""}
-    </article>
-  `;
-}
-
-function settingsLiveSourceRow(source, expanded) {
-  return `
-    <article class="settings-source-item ${expanded ? "expanded" : ""}" data-settings-live-source="${escapeAttr(source.key)}">
-      <button class="settings-source-head" type="button" data-select-settings-live-source="${escapeAttr(source.key)}">
-        <span class="settings-chevron">${expanded ? "⌄" : "›"}</span>
-        <strong>${escapeHtml(source.name || "未命名直播源")}</strong>
-        <span>${escapeHtml(source.key)}</span>
-        ${state.settingsLiveSource === source.key ? `<em>默认</em>` : ""}
-      </button>
-      ${expanded ? `
-        <div class="settings-source-editor">
-          ${settingsInput("资源标识", "key", source.key, "例如 iptv")}
-          ${settingsInput("显示名称", "name", source.name, "例如 我的直播源")}
-          ${settingsInput("订阅地址", "url", source.url, "https://example.com/live.m3u")}
-          ${settingsInput("User-Agent", "ua", source.ua || "", "可选")}
-          ${settingsInput("EPG地址", "epg", source.epg || "", "可选")}
-          ${settingsCheck("启用", "enabled", source.enabled)}
-          <div class="settings-editor-actions">
-            <button type="button" class="danger" data-delete-settings-live-source="${escapeAttr(source.key)}">删除</button>
           </div>
         </div>` : ""}
     </article>
@@ -343,34 +334,12 @@ function updateSettingsSourceField(key, field, value) {
   }
 }
 
-function updateSettingsLiveSourceField(key, field, value) {
-  const source = state.settingsLiveSources.find((item) => item.key === key);
-  if (!source) return;
-  const previousKey = source.key;
-  if (field === "enabled") source.enabled = Boolean(value);
-  else if (field === "ua" || field === "epg") source[field] = value || null;
-  else source[field] = value;
-  if (field === "key") {
-    state.settingsSelectedLiveSource = value;
-    if (state.settingsLiveSource === previousKey) state.settingsLiveSource = value;
-    source.key = value;
-  }
-}
-
 function addSettingsSource() {
   const key = uniqueSourceKey(state.settingsSources, "custom");
   state.settingsSources.unshift({ key, name: "自定义资源", api: "", detail: "", enabled: true });
   state.settingsSelectedSource = key;
   if (!state.settingsSource) state.settingsSource = key;
   renderSettingsSources();
-}
-
-function addSettingsLiveSource() {
-  const key = uniqueSourceKey(state.settingsLiveSources, "live");
-  state.settingsLiveSources.unshift({ key, name: "自定义直播源", url: "", ua: "", epg: "", enabled: true });
-  state.settingsSelectedLiveSource = key;
-  if (!state.settingsLiveSource) state.settingsLiveSource = key;
-  renderSettingsLiveSources();
 }
 
 function deleteSettingsSource(key) {
@@ -382,30 +351,6 @@ function deleteSettingsSource(key) {
   if (state.settingsSource === key) state.settingsSource = firstKey(state.settingsSources);
   state.settingsSelectedSource = firstKey(state.settingsSources);
   renderSettingsSources();
-}
-
-function deleteSettingsLiveSource(key) {
-  if (state.settingsLiveSources.length <= 1) {
-    setSettingsMessage("至少保留一个直播源", true);
-    return;
-  }
-  state.settingsLiveSources = state.settingsLiveSources.filter((source) => source.key !== key);
-  if (state.settingsLiveSource === key) state.settingsLiveSource = firstKey(state.settingsLiveSources);
-  state.settingsSelectedLiveSource = firstKey(state.settingsLiveSources);
-  renderSettingsLiveSources();
-}
-
-function parseLiveImport(text) {
-  if (!text) return [];
-  const parsed = JSON.parse(text);
-  return Object.entries(parsed.lives || parsed.live_sources || {}).map(([key, entry]) => ({
-    key,
-    name: entry.name || key,
-    url: entry.url || "",
-    ua: entry.ua || "",
-    epg: entry.epg || "",
-    enabled: entry.enabled !== false,
-  }));
 }
 
 function mergeByKey(existing, imported) {
@@ -439,21 +384,6 @@ async function importSettingsSources() {
     setSettingsMessage(error.message || "导入点播源失败", true);
   }
 }
-async function importSettingsLiveSources() {
-  try {
-    const imported = parseLiveImport($("liveSourceImport").value.trim());
-    if (!imported.length) throw new Error("没有可导入的直播源");
-    state.settingsLiveSources = mergeByKey(state.settingsLiveSources, imported);
-    if (!state.settingsLiveSource) state.settingsLiveSource = firstKey(state.settingsLiveSources);
-    state.settingsSelectedLiveSource = firstKey(imported) || state.settingsSelectedLiveSource;
-    closeModal("liveSourceImportDialog");
-    renderSettingsLiveSources();
-    setSettingsMessage("已合并导入，点击保存后写入 live-sources.json");
-  } catch (error) {
-    setSettingsMessage(error.message || "导入直播源失败", true);
-  }
-}
-
 async function saveSettings() {
   try {
     if (state.settingsSection === "vod") {
@@ -466,15 +396,6 @@ async function saveSettings() {
       renderSources();
       await loadCategories();
       await loadLibrary(true);
-    } else if (state.settingsSection === "live") {
-      const data = await postJson("/api/live/sources/save", {
-        sources: state.settingsLiveSources,
-        default_source: state.settingsLiveSource,
-      });
-      state.liveSources = data.sources || [];
-      state.liveSource = data.selected_source || state.liveSource;
-      renderLiveSources();
-      if (state.liveSource) await loadLiveChannels();
     }
     closeSettings();
   } catch (error) {
@@ -484,7 +405,7 @@ async function saveSettings() {
 
 function setView(name) {
   const appBody = document.querySelector(".app-body");
-  if (appBody) appBody.classList.toggle("media-mode", name === "player" || name === "live");
+  if (appBody) appBody.classList.toggle("media-mode", name === "player");
   document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
   document.querySelectorAll(".nav").forEach((button) => button.classList.remove("active"));
   document.querySelectorAll(".side-nav").forEach((button) => button.classList.remove("active"));
@@ -523,7 +444,7 @@ function showControls() {
   document.querySelectorAll(".media-controls").forEach((controls) => controls.classList.add("force-visible"));
   clearTimeout(state.hideControlsTimer);
   state.hideControlsTimer = setTimeout(() => {
-    if (!state.playerSettingsOpen && !state.livePlayerSettingsOpen && !state.volumeOpen && !state.liveVolumeOpen) {
+    if (!state.playerSettingsOpen && !state.volumeOpen) {
       document.body.classList.add("controls-hidden");
       document.querySelectorAll(".media-controls").forEach((controls) => controls.classList.remove("force-visible"));
     }
@@ -531,18 +452,15 @@ function showControls() {
 }
 
 function hideControlsNow() {
-  if (state.playerSettingsOpen || state.livePlayerSettingsOpen || state.volumeOpen || state.liveVolumeOpen) return;
+  if (state.playerSettingsOpen || state.volumeOpen) return;
   document.body.classList.add("controls-hidden");
   document.querySelectorAll(".media-controls").forEach((controls) => controls.classList.remove("force-visible"));
 }
 
 function setMenuOpenClasses() {
   const vodOpen = state.playerSettingsOpen || state.volumeOpen;
-  const liveOpen = state.livePlayerSettingsOpen || state.liveVolumeOpen;
   const vodControls = document.querySelector("#playerView .media-controls");
-  const liveControls = document.querySelector("#liveView .media-controls");
   if (vodControls) vodControls.classList.toggle("menu-open", vodOpen);
-  if (liveControls) liveControls.classList.toggle("menu-open", liveOpen);
 }
 
 function setPopup(id, open) {
@@ -554,18 +472,13 @@ function setPopup(id, open) {
 
 function closePlayerPopups(except = "") {
   if (except !== "vod-settings") state.playerSettingsOpen = false;
-  if (except !== "live-settings") state.livePlayerSettingsOpen = false;
   if (except !== "vod-volume") state.volumeOpen = false;
-  if (except !== "live-volume") state.liveVolumeOpen = false;
   setPopup("playerSettingsPopup", state.playerSettingsOpen);
-  setPopup("livePlayerSettingsPopup", state.livePlayerSettingsOpen);
   setPopup("volumePopup", state.volumeOpen);
-  setPopup("liveVolumePopup", state.liveVolumeOpen);
 }
 
 function setSettingsPage(kind, page = "main") {
-  const popupId = kind === "live" ? "livePlayerSettingsPopup" : "playerSettingsPopup";
-  const popup = $(popupId);
+  const popup = $("playerSettingsPopup");
   if (!popup) return;
   popup.querySelectorAll(".settings-page").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.settingsPage === page);
@@ -579,43 +492,29 @@ function speedText(speed) {
 
 function updatePlayerSettingLabels() {
   const speedLabel = $("speedLabel");
-  if (speedLabel) speedLabel.textContent = speedText(video ? video.playbackRate : 1);
+  if (speedLabel) speedLabel.textContent = speedText(state.playbackRate || 1);
   const audio = state.audioBalance === "off" ? "关闭" : state.audioBalance === "standard" ? "标准" : "强";
-  const liveAudio = state.liveAudioBalance === "off" ? "关闭" : state.liveAudioBalance === "standard" ? "标准" : "强";
   const enhance = state.videoEnhance === "off" ? "关闭" : state.videoEnhance === "standard" ? "标准" : "清晰";
-  const liveEnhance = state.liveVideoEnhance === "off" ? "关闭" : state.liveVideoEnhance === "standard" ? "标准" : "清晰";
   if ($("audioBalanceLabel")) $("audioBalanceLabel").textContent = audio;
-  if ($("liveAudioBalanceLabel")) $("liveAudioBalanceLabel").textContent = liveAudio;
   if ($("videoEnhanceLabel")) $("videoEnhanceLabel").textContent = enhance;
-  if ($("liveVideoEnhanceLabel")) $("liveVideoEnhanceLabel").textContent = liveEnhance;
   if ($("fillVideoLabel")) $("fillVideoLabel").textContent = state.fillVod ? "填充" : "原始";
-  if ($("liveFillVideoLabel")) $("liveFillVideoLabel").textContent = state.fillLive ? "填充" : "原始";
   if ($("compactLabel")) $("compactLabel").textContent = state.compactMode ? "退出" : "开启";
-  if ($("liveCompactLabel")) $("liveCompactLabel").textContent = state.compactMode ? "退出" : "开启";
   if ($("fullscreenLabel")) $("fullscreenLabel").textContent = state.fullscreenMode ? "退出" : "开启";
-  if ($("liveFullscreenLabel")) $("liveFullscreenLabel").textContent = state.fullscreenMode ? "退出" : "开启";
 
   document.querySelectorAll("[data-player-speed]").forEach((button) => {
-    button.classList.toggle("active", Math.abs(Number(button.dataset.playerSpeed) - video.playbackRate) < 0.02);
+    button.classList.toggle("active", Math.abs(Number(button.dataset.playerSpeed) - (state.playbackRate || 1)) < 0.02);
   });
   document.querySelectorAll("#playerSettingsPopup [data-audio-balance]").forEach((button) => {
     button.classList.toggle("active", button.dataset.audioBalance === state.audioBalance);
   });
-  document.querySelectorAll("#livePlayerSettingsPopup [data-audio-balance]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.audioBalance === state.liveAudioBalance);
-  });
   document.querySelectorAll("#playerSettingsPopup [data-video-enhance]").forEach((button) => {
     button.classList.toggle("active", button.dataset.videoEnhance === state.videoEnhance);
   });
-  document.querySelectorAll("#livePlayerSettingsPopup [data-video-enhance]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.videoEnhance === state.liveVideoEnhance);
-  });
   document.body.classList.toggle("fill-vod", state.fillVod);
-  document.body.classList.toggle("fill-live", state.fillLive);
   document.body.classList.toggle("app-compact", state.compactMode);
   document.body.classList.toggle("app-fullscreen", state.fullscreenMode);
-  document.body.classList.toggle("video-enhance-standard", state.videoEnhance === "standard" || state.liveVideoEnhance === "standard");
-  document.body.classList.toggle("video-enhance-clear", state.videoEnhance === "clear" || state.liveVideoEnhance === "clear");
+  document.body.classList.toggle("video-enhance-standard", state.videoEnhance === "standard");
+  document.body.classList.toggle("video-enhance-clear", state.videoEnhance === "clear");
 }
 
 function setVolume(targetVideo, sliderId, valueId, value) {
@@ -627,21 +526,34 @@ function setVolume(targetVideo, sliderId, valueId, value) {
   if (label) label.textContent = String(Math.round(next * 100));
 }
 
+function activeArt(kind) {
+  return state.vodArt;
+}
+
+function activeVideoForKind(kind) {
+  const art = activeArt(kind);
+  return art && art.video ? art.video : video;
+}
+
+function setPlayerPlayState(kind, playing) {
+  const button = $("playBtn");
+  if (!button) return;
+  button.classList.toggle("is-playing", playing);
+  button.dataset.state = playing ? "playing" : "paused";
+}
+
 function setAudioBalance(kind, mode) {
-  if (kind === "live") state.liveAudioBalance = mode;
-  else state.audioBalance = mode;
+  state.audioBalance = mode;
   updatePlayerSettingLabels();
 }
 
 function setVideoEnhance(kind, mode) {
-  if (kind === "live") state.liveVideoEnhance = mode;
-  else state.videoEnhance = mode;
+  state.videoEnhance = mode;
   updatePlayerSettingLabels();
 }
 
 function toggleFill(kind) {
-  if (kind === "live") state.fillLive = !state.fillLive;
-  else state.fillVod = !state.fillVod;
+  state.fillVod = !state.fillVod;
   updatePlayerSettingLabels();
 }
 
@@ -651,17 +563,14 @@ function toggleCompactMode() {
     const activeView = document.querySelector(".view.active");
     state.compactRestoreView = activeView ? activeView.id.replace(/View$/, "") : "home";
     state.compactRestorePlaySide = state.playSideOpen;
-    state.compactRestoreLiveSide = state.liveSideOpen;
     state.compactMode = true;
     if (state.fullscreenMode) state.fullscreenMode = false;
     setView("player");
     setDrawer("play", false);
-    setDrawer("live", false);
   } else {
     state.compactMode = false;
     setView(state.compactRestoreView || "home");
     setDrawer("play", state.compactRestorePlaySide);
-    setDrawer("live", state.compactRestoreLiveSide);
   }
   closePlayerPopups();
   ipc("toggle_compact");
@@ -674,18 +583,14 @@ function toggleFullscreenMode() {
   state.fullscreenMode = entering;
   if (entering) {
     state.fullscreenRestorePlaySide = state.playSideOpen;
-    state.fullscreenRestoreLiveSide = state.liveSideOpen;
     state.playSideOpen = false;
-    state.liveSideOpen = false;
   }
   if (state.fullscreenMode && state.compactMode) {
     state.compactMode = false;
     setView(state.compactRestoreView || "player");
     setDrawer("play", state.compactRestorePlaySide);
-    setDrawer("live", state.compactRestoreLiveSide);
   }
   setDrawer("play", entering ? false : state.fullscreenRestorePlaySide);
-  setDrawer("live", entering ? false : state.fullscreenRestoreLiveSide);
   closePlayerPopups();
   ipc("toggle_fullscreen");
   updatePlayerSettingLabels();
@@ -693,10 +598,18 @@ function toggleFullscreenMode() {
   else hideControlsNow();
 }
 
-function paintCenterState(targetId, text) {
+function setCenterStateIcon(targetId, mode) {
   const target = $(targetId);
   if (!target) return;
-  target.textContent = text;
+  target.textContent = "";
+  target.classList.toggle("icon-play", mode === "play");
+  target.classList.toggle("icon-pause", mode === "pause");
+}
+
+function paintCenterState(targetId, mode) {
+  const target = $(targetId);
+  if (!target) return;
+  setCenterStateIcon(targetId, mode);
   target.classList.remove("hidden");
   setTimeout(() => target.classList.add("hidden"), 700);
 }
@@ -706,7 +619,7 @@ function setStatus(target, text) {
 }
 
 async function bootstrap() {
-  await Promise.all([bootstrapVod(), bootstrapLive()]);
+  await bootstrapVod();
 }
 
 async function bootstrapVod() {
@@ -724,15 +637,6 @@ async function bootstrapVod() {
   await loadLibrary(true);
 }
 
-async function bootstrapLive() {
-  const data = await api("/api/live/bootstrap");
-  state.liveSources = data.sources || [];
-  state.liveSource = data.selected_source || firstEnabledKey(state.liveSources) || firstKey(state.liveSources);
-  renderLiveSources();
-  if (state.liveSource) await loadLiveChannels();
-  else setStatus($("liveChannels"), "请先在设置中导入直播源。");
-}
-
 function renderSources() {
   const select = $("settingsSourceSelect");
   if (!select) return;
@@ -740,23 +644,6 @@ function renderSources() {
     .map((source) => `<option value="${escapeAttr(source.key)}">${escapeHtml(source.name)}</option>`)
     .join("");
   select.value = state.source;
-}
-
-function renderLiveSources() {
-  const count = $("liveSourceCount");
-  if (count) count.textContent = `${state.liveSources.length} 个源`;
-  const list = $("liveSourceListPanel");
-  if (!list) return;
-  list.innerHTML = state.liveSources
-    .map((source) => {
-      const active = source.key === state.liveSource ? "active" : "";
-      return `
-        <button class="live-source-row ${active}" data-live-source-key="${escapeAttr(source.key)}" type="button">
-          <strong>${escapeHtml(source.name)}</strong>
-          <span>${source.enabled === false ? "停用" : "启用"}</span>
-        </button>`;
-    })
-    .join("") || `<p class="muted">未配置直播源</p>`;
 }
 
 async function loadCategories() {
@@ -871,7 +758,6 @@ function cardHtml(item) {
         ${item.remarks ? `<span class="remarks">${escapeHtml(item.remarks)}</span>` : ""}
       </div>
       <div class="card-title">${escapeHtml(item.title)}</div>
-      <div class="card-meta">${escapeHtml([item.source_name, item.year].filter(Boolean).join(" "))}</div>
     </article>
   `;
 }
@@ -1490,13 +1376,12 @@ async function playEpisode(index, start = 0) {
   const item = state.current;
   if (!item || !item.episodes || !item.episodes[index]) return;
   saveHistorySoon();
-  stopLivePlayback();
   state.episodeIndex = index;
   state.pendingStart = Number(start) || 0;
   renderDetail();
   $("loadingState").classList.remove("hidden");
   const episode = item.episodes[index];
-  updateTitleText(`${item.title} ${episode.title || `第${index + 1}集`}`);
+  updateTitleText(`${item.title} ${episode.title || `第${index + 1}集`}`.trim());
   const { url } = await api(`/api/play-url?url=${encodeURIComponent(episode.url)}`);
   await loadIntoVideo({
     video,
@@ -1508,36 +1393,15 @@ async function playEpisode(index, start = 0) {
   });
 }
 
-async function loadIntoVideo({ video, url, hlsKey, start = 0, autoplay = true, onReady = null }) {
-  resetVideo(video, hlsKey);
-  const lower = url.toLowerCase();
-  const isHlsUrl = lower.includes(".m3u8") || lower.includes("/proxy/m3u8");
-  if (isHlsUrl) await ensureHlsLoaded();
-  if (window.Hls && window.Hls.isSupported && window.Hls.isSupported() && isHlsUrl) {
-    const hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: true,
-      backBufferLength: 60,
-    });
-    state[hlsKey] = hls;
-    hls.loadSource(url);
-    hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      applyStart(video, start);
-      if (onReady) onReady();
-      if (autoplay) video.play().catch(console.warn);
-    });
-    hls.on(Hls.Events.ERROR, (_, data) => {
-      console.warn("hls error", data);
-      if (data && data.fatal) {
-        hls.destroy();
-        state[hlsKey] = null;
-        playNative(video, url, start, autoplay, onReady);
-      }
-    });
-    return;
-  }
-  playNative(video, url, start, autoplay, onReady);
+async function loadIntoVideo({ video, url, hlsKey, start = 0, autoplay = true, onReady = null, forceHls = false }) {
+  await loadArtPlayer({
+    kind: "vod",
+    url,
+    mediaType: forceHls ? "m3u8" : mediaTypeFromUrl(url),
+    start,
+    autoplay,
+    onReady,
+  });
 }
 
 function ensureHlsLoaded() {
@@ -1551,13 +1415,169 @@ function ensureHlsLoaded() {
   });
 }
 
-function playNative(targetVideo, url, start, autoplay, onReady) {
-  targetVideo.src = url;
-  targetVideo.onloadedmetadata = () => {
+function ensureArtPlayerLoaded() {
+  if (window.Artplayer) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/artplayer.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("ArtPlayer 加载失败"));
+    document.head.appendChild(script);
+  });
+}
+
+function ensureFlvLoaded() {
+  if (window.flvjs) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "/flv.min.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("flv.js 加载失败"));
+    document.head.appendChild(script);
+  });
+}
+
+function mediaTypeFromUrl(url) {
+  const lower = String(url || "").toLowerCase();
+  if (lower.includes(".mp4")) return "mp4";
+  if (lower.includes(".m3u8") || lower.includes(".m3u") || lower.includes("/proxy/m3u8")) return "m3u8";
+  return "m3u8";
+}
+
+async function loadArtPlayer({ kind, url, mediaType = "m3u8", start = 0, autoplay = true, onReady = null }) {
+  await ensureArtPlayerLoaded();
+  if (mediaType === "m3u8") await ensureHlsLoaded();
+  destroyArtPlayer(kind);
+  const container = $("vodArtContainer");
+  if (!container) return;
+  const art = new Artplayer({
+    container,
+    url,
+    type: mediaType,
+    customType: {
+      m3u8: artHlsLoader(kind),
+    },
+    autoplay,
+    muted: false,
+    volume: activeVideoForKind(kind).volume || 1,
+    isLive: false,
+    autoSize: false,
+    autoMini: false,
+    fullscreen: false,
+    fullscreenWeb: false,
+    pip: false,
+    screenshot: false,
+    setting: false,
+    playbackRate: false,
+    aspectRatio: false,
+    hotkey: false,
+    miniProgressBar: false,
+    mutex: true,
+    playsInline: true,
+    theme: "#22c55e",
+    lang: "zh-cn",
+    moreVideoAttr: {
+      playsInline: true,
+      preload: "metadata",
+    },
+  });
+  state.vodArt = art;
+  bindArtEvents(kind, art, start, onReady);
+}
+
+function artHlsLoader(kind) {
+  return (targetVideo, url) => {
+    if (!window.Hls || !window.Hls.isSupported()) {
+      targetVideo.src = url;
+      return;
+    }
+    destroyHls("vodHls");
+    const hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      maxBufferLength: 60,
+      backBufferLength: 60,
+      maxBufferSize: 60 * 1000 * 1000,
+    });
+    state.vodHls = hls;
+    hls.loadSource(url);
+    hls.attachMedia(targetVideo);
+    hls.on(Hls.Events.ERROR, (_, data) => {
+      if (data && data.fatal) {
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+        else destroyHls("vodHls");
+      }
+    });
+  };
+}
+
+function artFlvLoader(kind) {
+  return (targetVideo, url) => {
+    if (!window.flvjs || !window.flvjs.isSupported()) {
+      console.warn("当前环境不支持 FLV 播放。");
+      return;
+    }
+    destroyFlv(kind);
+    const flv = flvjs.createPlayer({ type: "flv", url, isLive: false });
+    flv.attachMediaElement(targetVideo);
+    flv.load();
+    state.vodFlv = flv;
+  };
+}
+
+function bindArtEvents(kind, art, start, onReady) {
+  const targetVideo = art.video;
+  targetVideo.volume = Number($("volumeSlider")?.value || 1);
+  targetVideo.playbackRate = state.playbackRate || 1;
+  targetVideo.addEventListener("loadedmetadata", () => applyStart(targetVideo, start), { once: true });
+  targetVideo.addEventListener("play", () => {
+    setPlayerPlayState(kind, true);
+    $("centerState").classList.add("hidden");
+    showControls();
+  });
+  targetVideo.addEventListener("pause", () => {
+    setPlayerPlayState(kind, false);
+    setCenterStateIcon("centerState", "pause");
+    $("centerState").classList.remove("hidden");
+  });
+  art.on("ready", () => {
     applyStart(targetVideo, start);
     if (onReady) onReady();
-    if (autoplay) targetVideo.play().catch(console.warn);
-  };
+  });
+  art.on("play", () => {
+    setPlayerPlayState(kind, true);
+    $("centerState").classList.add("hidden");
+    showControls();
+  });
+  art.on("pause", () => {
+    setPlayerPlayState(kind, false);
+    setCenterStateIcon("centerState", "pause");
+    $("centerState").classList.remove("hidden");
+  });
+  art.on("video:waiting", () => {
+    $("loadingState").classList.remove("hidden");
+  });
+  art.on("video:playing", () => {
+    $("loadingState").classList.add("hidden");
+  });
+  art.on("video:timeupdate", () => {
+    updateVodProgressFromVideo(targetVideo);
+  });
+}
+
+function updateVodProgressFromVideo(targetVideo) {
+  $("timeText").textContent = `${formatTime(targetVideo.currentTime)} / ${formatTime(targetVideo.duration)}`;
+  if (Number.isFinite(targetVideo.duration) && targetVideo.duration > 0) {
+    $("seek").value = String(Math.floor((targetVideo.currentTime / targetVideo.duration) * 1000));
+    updateSeekVisual();
+    if (state.skip.enabled && state.skip.intro > 0 && targetVideo.currentTime > 0 && targetVideo.currentTime < state.skip.intro) {
+      targetVideo.currentTime = state.skip.intro;
+    }
+    if (state.skip.enabled && state.skip.outro > 0 && targetVideo.duration - targetVideo.currentTime <= state.skip.outro) {
+      playEpisode(state.episodeIndex + 1);
+    }
+  }
 }
 
 function applyStart(targetVideo, start) {
@@ -1579,11 +1599,45 @@ function destroyHls(hlsKey) {
   }
 }
 
+function destroyFlv(kind) {
+  const key = "vodFlv";
+  if (state[key]) {
+    try {
+      if (state[key].unload) state[key].unload();
+      state[key].destroy();
+    } catch (error) {
+      console.warn("destroy flv failed", error);
+    }
+    state[key] = null;
+  }
+}
+
+function destroyArtPlayer(kind) {
+  const artKey = "vodArt";
+  destroyHls("vodHls");
+  destroyFlv(kind);
+  if (state[artKey]) {
+    try {
+      state[artKey].destroy(false);
+    } catch (error) {
+      console.warn("destroy artplayer failed", error);
+    }
+    state[artKey] = null;
+  }
+  setPlayerPlayState(kind, false);
+}
+
 function resetVideo(targetVideo, hlsKey) {
-  destroyHls(hlsKey);
-  targetVideo.pause();
-  targetVideo.removeAttribute("src");
-  targetVideo.load();
+  destroyArtPlayer("vod");
+  if (targetVideo) {
+    targetVideo.dataset.resetting = "true";
+    targetVideo.pause();
+    targetVideo.removeAttribute("src");
+    targetVideo.load();
+    setTimeout(() => {
+      delete targetVideo.dataset.resetting;
+    }, 0);
+  }
 }
 
 function stopVodPlayback() {
@@ -1592,15 +1646,12 @@ function stopVodPlayback() {
   if (loading) loading.classList.add("hidden");
 }
 
-function stopLivePlayback() {
-  if (liveVideo) resetVideo(liveVideo, "liveHls");
-}
-
 function saveHistorySoon() {
   const item = state.current;
   if (!item || !item.episodes || !item.episodes[state.episodeIndex]) return;
-  const progress = Math.floor(video.currentTime || 0);
-  const duration = Math.floor(Number.isFinite(video.duration) ? video.duration : 0);
+  const targetVideo = activeVideoForKind("vod");
+  const progress = Math.floor(targetVideo.currentTime || 0);
+  const duration = Math.floor(Number.isFinite(targetVideo.duration) ? targetVideo.duration : 0);
   if (progress < 2 && state.episodeIndex === 0) return;
   postJson("/api/history", {
     source: item.source,
@@ -1655,102 +1706,22 @@ async function search() {
   appendCards($("searchResults"), results || []);
 }
 
-async function loadLiveChannels() {
-  if (!state.liveSource) return;
-  setStatus($("liveChannels"), "频道加载中...");
-  const playlist = await api(`/api/live/channels?source=${encodeURIComponent(state.liveSource)}`);
-  state.liveChannels = playlist.channels || [];
-  state.liveGroup = liveGroups()[0] || "";
-  renderLiveGroups();
-  renderLiveChannels();
-}
-
-function liveGroups() {
-  const seen = new Set();
-  const groups = [];
-  for (const channel of state.liveChannels) {
-    const group = channel.group || "未分组";
-    if (!seen.has(group)) {
-      seen.add(group);
-      groups.push(group);
-    }
-  }
-  return groups;
-}
-
-function renderLiveGroups() {
-  $("liveGroups").innerHTML = liveGroups()
-    .map((group) => {
-      const active = group === state.liveGroup ? "active" : "";
-      return `<button class="${active}" data-live-group="${escapeAttr(group)}">${escapeHtml(group)}</button>`;
-    })
-    .join("");
-}
-
-function renderLiveChannels() {
-  const query = $("liveSearchInput").value.trim().toLowerCase();
-  const channels = state.liveChannels.filter((channel) => {
-    const sameGroup = !state.liveGroup || (channel.group || "未分组") === state.liveGroup;
-    const matchQuery = !query || channel.name.toLowerCase().includes(query);
-    return sameGroup && matchQuery;
-  });
-  $("liveChannels").innerHTML = channels
-    .map((channel, index) => {
-      const active = state.liveCurrent && state.liveCurrent.url === channel.url ? "active" : "";
-      return `
-        <button class="live-channel ${active}" data-live-index="${state.liveChannels.indexOf(channel)}">
-          <span>${escapeHtml(channel.name)}</span>
-          <small>${escapeHtml(channel.source_name || "")}</small>
-        </button>`;
-    })
-    .join("") || `<p class="muted">没有频道</p>`;
-}
-
-async function playLiveChannel(index) {
-  const channel = state.liveChannels[index];
-  if (!channel) return;
-  saveHistorySoon();
-  stopVodPlayback();
-  state.liveCurrent = channel;
-  updateTitleText(channel.name);
-  $("liveNameText").textContent = channel.name;
-  $("liveCenterState").classList.add("hidden");
-  renderLiveChannels();
-  const { url } = await api(`/api/play-url?url=${encodeURIComponent(channel.url)}`);
-  await loadIntoVideo({
-    video: liveVideo,
-    url,
-    hlsKey: "liveHls",
-    autoplay: true,
-  });
-  setView("live");
-}
-
 function updateTitleText(text = "") {
-  $("titleText").textContent = text || "ePlayer";
-  document.title = text || "ePlayer";
+  const title = text || "ePlayer";
+  $("titleText").textContent = title;
+  document.title = title;
+  ipc(`set_title:${title}`);
 }
 
 function setDrawer(name, open) {
-  const side = name === "live" ? $("liveSide") : $("playSide");
-  const button = name === "live" ? $("liveSideToggle") : $("playSideToggle");
-  const view = name === "live" ? $("liveView") : $("playerView");
+  const side = $("playSide");
+  const button = $("playSideToggle");
+  const view = $("playerView");
   side.classList.toggle("open", open);
   button.classList.toggle("open", open);
   if (view) view.classList.toggle("drawer-open", open);
   button.textContent = open ? "›" : "‹";
-  if (name === "live") state.liveSideOpen = open;
-  else state.playSideOpen = open;
-}
-
-function setLiveTab(tab) {
-  state.liveTab = tab;
-  document.querySelectorAll("[data-live-tab]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.liveTab === tab);
-  });
-  document.querySelectorAll(".live-side-panel").forEach((panel) => panel.classList.remove("active"));
-  if (tab === "channels" && $("liveChannelsPanel")) $("liveChannelsPanel").classList.add("active");
-  if (tab === "sources" && $("liveSourcesPanel")) $("liveSourcesPanel").classList.add("active");
+  state.playSideOpen = open;
 }
 
 function escapeHtml(value) {
@@ -1772,16 +1743,12 @@ document.addEventListener("click", async (event) => {
   if (actionButton) {
     const actions = {
       addSource: addSettingsSource,
-      addLiveSource: addSettingsLiveSource,
       openImport: () => openModal("sourceImportDialog"),
-      openLiveImport: () => openModal("liveSourceImportDialog"),
       save: saveSettings,
       cancel: closeSettings,
       close: closeSettings,
       importSource: importSettingsSources,
-      importLiveSource: importSettingsLiveSources,
       closeSourceImport: () => closeModal("sourceImportDialog"),
-      closeLiveSourceImport: () => closeModal("liveSourceImportDialog"),
     };
     const action = actions[actionButton.dataset.settingsAction];
     if (action) {
@@ -1825,15 +1792,6 @@ document.addEventListener("click", async (event) => {
     renderSettingsSources();
     return;
   }
-
-  const liveSourceHead = event.target.closest("[data-select-settings-live-source]");
-  if (liveSourceHead) {
-    const key = liveSourceHead.dataset.selectSettingsLiveSource;
-    state.settingsSelectedLiveSource = state.settingsSelectedLiveSource === key ? "" : key;
-    renderSettingsLiveSources();
-    return;
-  }
-
   const deleteSource = event.target.closest("[data-delete-settings-source]");
   if (deleteSource) {
     event.preventDefault();
@@ -1841,15 +1799,6 @@ document.addEventListener("click", async (event) => {
     deleteSettingsSource(deleteSource.dataset.deleteSettingsSource);
     return;
   }
-
-  const deleteLiveSource = event.target.closest("[data-delete-settings-live-source]");
-  if (deleteLiveSource) {
-    event.preventDefault();
-    event.stopPropagation();
-    deleteSettingsLiveSource(deleteLiveSource.dataset.deleteSettingsLiveSource);
-    return;
-  }
-
   const parentCategory = event.target.closest("[data-parent-category]");
   if (parentCategory) {
     state.parentCategory = parentCategory.dataset.parentCategory;
@@ -1919,7 +1868,8 @@ document.addEventListener("click", async (event) => {
   if (speedChoice) {
     event.preventDefault();
     event.stopPropagation();
-    video.playbackRate = Number(speedChoice.dataset.playerSpeed) || 1;
+    state.playbackRate = Number(speedChoice.dataset.playerSpeed) || 1;
+    activeVideoForKind("vod").playbackRate = state.playbackRate;
     updatePlayerSettingLabels();
     showControls();
     return;
@@ -1951,7 +1901,6 @@ document.addEventListener("click", async (event) => {
     event.stopPropagation();
     const action = playerAction.dataset.playerAction;
     if (action === "vod-fill") toggleFill("vod");
-    if (action === "live-fill") toggleFill("live");
     if (action === "compact") toggleCompactMode();
     if (action === "fullscreen") toggleFullscreenMode();
     showControls();
@@ -1973,7 +1922,7 @@ document.addEventListener("click", async (event) => {
   const candidate = event.target.closest("[data-source-candidate-source]");
   if (candidate) {
     const keepIndex = state.episodeIndex;
-    const keepTime = Math.floor(video.currentTime || 0);
+    const keepTime = Math.floor(activeVideoForKind("vod").currentTime || 0);
     await openDetail(
       candidate.dataset.sourceCandidateSource,
       candidate.dataset.sourceCandidateId,
@@ -1994,37 +1943,6 @@ document.addEventListener("click", async (event) => {
     await openHistoryItem(history);
     return;
   }
-
-  const liveTab = event.target.closest("[data-live-tab]");
-  if (liveTab) {
-    setLiveTab(liveTab.dataset.liveTab);
-    return;
-  }
-
-  const liveSource = event.target.closest("[data-live-source-key]");
-  if (liveSource) {
-    state.liveSource = liveSource.dataset.liveSourceKey;
-    await postJson("/api/live/settings/default-source", { source: state.liveSource });
-    renderLiveSources();
-    await loadLiveChannels();
-    setLiveTab("channels");
-    return;
-  }
-
-  const liveGroup = event.target.closest("[data-live-group]");
-  if (liveGroup) {
-    state.liveGroup = liveGroup.dataset.liveGroup;
-    renderLiveGroups();
-    renderLiveChannels();
-    return;
-  }
-
-  const liveChannel = event.target.closest("[data-live-index]");
-  if (liveChannel) {
-    await playLiveChannel(Number(liveChannel.dataset.liveIndex));
-    return;
-  }
-
   if (state.historyOpen && !event.target.closest("#historyPopup") && !event.target.closest("#historyBtn")) {
     setHistoryPopup(false);
   }
@@ -2045,16 +1963,6 @@ document.addEventListener("change", (event) => {
     renderSettingsSources();
     return;
   }
-  const liveSourceItem = field.closest("[data-settings-live-source]");
-  if (liveSourceItem) {
-    const key = field.dataset.keyField ? state.settingsSelectedLiveSource : liveSourceItem.dataset.settingsLiveSource;
-    updateSettingsLiveSourceField(
-      key,
-      field.dataset.settingsField,
-      field.type === "checkbox" ? field.checked : field.value,
-    );
-    renderSettingsLiveSources();
-  }
 });
 
 on("settingsSourceSelect", "change", (event) => {
@@ -2062,29 +1970,17 @@ on("settingsSourceSelect", "change", (event) => {
   renderSettingsSources();
 });
 
-on("settingsLiveSourceSelect", "change", (event) => {
-  state.settingsLiveSource = event.target.value;
-  renderSettingsLiveSources();
-});
-
 on("searchBtn", "click", search);
 on("searchInput", "keydown", (event) => {
   if (event.key === "Enter") search();
 });
-on("liveSearchInput", "input", renderLiveChannels);
 
-on("sideSettingsBtn", "click", openSettings);
-on("liveSettingsBtn", "click", async () => {
-  await openSettings();
-  setSettingsSection("live");
-});
-on("minimizeBtn", "click", () => ipc("minimize"));
+on("sideSettingsBtn", "click", openSettings);on("minimizeBtn", "click", () => ipc("minimize"));
 on("maximizeBtn", "click", () => ipc("maximize"));
 on("closeBtn", "click", () => ipc("close"));
 const titlebar = document.querySelector(".titlebar");
 if (titlebar) titlebar.addEventListener("mousedown", startTitleDrag);
 on("playSideToggle", "click", () => setDrawer("play", !state.playSideOpen));
-on("liveSideToggle", "click", () => setDrawer("live", !state.liveSideOpen));
 on("historyBtn", "click", async (event) => {
   event.stopPropagation();
   if (state.historyOpen) {
@@ -2111,26 +2007,11 @@ on("historyList", "click", async (event) => {
   await openHistoryItem(item);
 });
 
-on("playBtn", "click", () => (video.paused ? video.play() : video.pause()));
+on("playBtn", "click", () => {
+  const targetVideo = activeVideoForKind("vod");
+  targetVideo.paused ? targetVideo.play() : targetVideo.pause();
+});
 on("nextEpisodeBtn", "click", () => playEpisode(state.episodeIndex + 1));
-on("livePlayBtn", "click", () => (liveVideo.paused ? liveVideo.play() : liveVideo.pause()));
-if (video) {
-  video.addEventListener("click", () => {
-    const willPlay = video.paused;
-    willPlay ? video.play() : video.pause();
-    paintCenterState("centerState", willPlay ? "播放" : "暂停");
-    showControls();
-  });
-}
-if (liveVideo) {
-  liveVideo.addEventListener("click", () => {
-    const willPlay = liveVideo.paused;
-    willPlay ? liveVideo.play() : liveVideo.pause();
-    paintCenterState("liveCenterState", willPlay ? "播放" : "暂停");
-    showControls();
-  });
-}
-
 if (video) {
   video.addEventListener("play", () => {
     $("playBtn").classList.add("is-playing");
@@ -2141,6 +2022,7 @@ if (video) {
   video.addEventListener("pause", () => {
     $("playBtn").classList.remove("is-playing");
     $("playBtn").dataset.state = "paused";
+    setCenterStateIcon("centerState", "pause");
     $("centerState").classList.remove("hidden");
   });
   video.addEventListener("waiting", () => $("loadingState").classList.remove("hidden"));
@@ -2157,20 +2039,6 @@ if (video) {
         playEpisode(state.episodeIndex + 1);
       }
     }
-  });
-}
-
-if (liveVideo) {
-  liveVideo.addEventListener("play", () => {
-    $("livePlayBtn").classList.add("is-playing");
-    $("livePlayBtn").dataset.state = "playing";
-    $("liveCenterState").classList.add("hidden");
-    showControls();
-  });
-  liveVideo.addEventListener("pause", () => {
-    $("livePlayBtn").classList.remove("is-playing");
-    $("livePlayBtn").dataset.state = "paused";
-    $("liveCenterState").classList.remove("hidden");
   });
 }
 
@@ -2197,8 +2065,9 @@ window.addEventListener("beforeunload", saveHistorySoon);
 
 on("seek", "input", () => {
   updateSeekVisual();
-  if (Number.isFinite(video.duration) && video.duration > 0) {
-    video.currentTime = (Number($("seek").value) / 1000) * video.duration;
+  const targetVideo = activeVideoForKind("vod");
+  if (Number.isFinite(targetVideo.duration) && targetVideo.duration > 0) {
+    targetVideo.currentTime = (Number($("seek").value) / 1000) * targetVideo.duration;
   }
 });
 on("volumeBtn", "click", (event) => {
@@ -2206,37 +2075,16 @@ on("volumeBtn", "click", (event) => {
   state.volumeOpen = !state.volumeOpen;
   closePlayerPopups("vod-volume");
   setPopup("volumePopup", state.volumeOpen);
-});
-on("liveVolumeBtn", "click", (event) => {
-  event.stopPropagation();
-  state.liveVolumeOpen = !state.liveVolumeOpen;
-  closePlayerPopups("live-volume");
-  setPopup("liveVolumePopup", state.liveVolumeOpen);
-});
-on("volumeSlider", "input", (event) => {
-  setVolume(video, "volumeSlider", "volumeValue", event.target.value);
-});
-on("liveVolume", "input", (event) => {
-  setVolume(liveVideo, "liveVolume", "liveVolumeValue", event.target.value);
-});
-on("playerSettingsBtn", "click", (event) => {
+});on("volumeSlider", "input", (event) => {
+  setVolume(activeVideoForKind("vod"), "volumeSlider", "volumeValue", event.target.value);
+});on("playerSettingsBtn", "click", (event) => {
   event.stopPropagation();
   state.playerSettingsOpen = !state.playerSettingsOpen;
   closePlayerPopups("vod-settings");
   setSettingsPage("vod", "main");
   setPopup("playerSettingsPopup", state.playerSettingsOpen);
-});
-on("livePlayerSettingsBtn", "click", (event) => {
-  event.stopPropagation();
-  state.livePlayerSettingsOpen = !state.livePlayerSettingsOpen;
-  closePlayerPopups("live-settings");
-  setSettingsPage("live", "main");
-  setPopup("livePlayerSettingsPopup", state.livePlayerSettingsOpen);
-});
-on("compactBtn", "click", toggleCompactMode);
-on("liveCompactBtn", "click", toggleCompactMode);
+});on("compactBtn", "click", toggleCompactMode);
 on("fullscreenBtn", "click", toggleFullscreenMode);
-on("liveFullscreenBtn", "click", toggleFullscreenMode);
 
 document.addEventListener("pointermove", (event) => {
   if (event.target.closest(".player-shell")) {
@@ -2244,10 +2092,25 @@ document.addEventListener("pointermove", (event) => {
     if (state.fullscreenMode) {
       clearTimeout(state.hideControlsTimer);
       state.hideControlsTimer = setTimeout(() => {
-        if (!state.playerSettingsOpen && !state.livePlayerSettingsOpen && !state.volumeOpen && !state.liveVolumeOpen) {
+        if (!state.playerSettingsOpen && !state.volumeOpen) {
           hideControlsNow();
         }
       }, 2000);
+    }
+    return;
+  }
+  if (state.compactMode) {
+    const shell = document.querySelector("#playerView .player-shell");
+    if (shell) {
+      const rect = shell.getBoundingClientRect();
+      if (
+        event.clientX >= rect.left
+        && event.clientX <= rect.right
+        && event.clientY >= rect.bottom - 76
+        && event.clientY <= rect.bottom
+      ) {
+        showControls();
+      }
     }
   }
 });
@@ -2276,10 +2139,11 @@ on("skipBtn", "click", () => {
   $("skipDialog").showModal();
 });
 on("introCurrentBtn", "click", () => {
-  $("introInput").value = String(Math.max(0, Math.round(video.currentTime || 0)));
+  $("introInput").value = String(Math.max(0, Math.round(activeVideoForKind("vod").currentTime || 0)));
 });
 on("outroCurrentBtn", "click", () => {
-  const remaining = Number.isFinite(video.duration) ? Math.max(0, Math.round(video.duration - (video.currentTime || 0))) : 0;
+  const targetVideo = activeVideoForKind("vod");
+  const remaining = Number.isFinite(targetVideo.duration) ? Math.max(0, Math.round(targetVideo.duration - (targetVideo.currentTime || 0))) : 0;
   $("outroInput").value = String(remaining);
 });
 on("saveSkipBtn", "click", async () => {
@@ -2303,9 +2167,18 @@ on("clearSkipBtn", "click", async () => {
   $("saveSkipBtn").click();
 });
 
+document.querySelector("#playerView .player-shell")?.addEventListener("click", (event) => {
+  if (event.target.closest(".media-controls, .player-settings-popup, .volume-popup, button, input, select, textarea")) return;
+  const targetVideo = activeVideoForKind("vod");
+  const willPlay = targetVideo.paused;
+  willPlay ? targetVideo.play() : targetVideo.pause();
+  paintCenterState("centerState", willPlay ? "play" : "pause");
+  showControls();
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.target.matches("input, textarea, select")) return;
-  const activeVideo = $("liveView").classList.contains("active") ? liveVideo : video;
+  const activeVideo = activeVideoForKind("vod");
   if (event.key === "Escape" && state.fullscreenMode) {
     event.preventDefault();
     toggleFullscreenMode();
@@ -2315,8 +2188,8 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     activeVideo.paused ? activeVideo.play() : activeVideo.pause();
   }
-  if (activeVideo === video && event.key === "ArrowLeft") video.currentTime = Math.max(0, video.currentTime - 10);
-  if (activeVideo === video && event.key === "ArrowRight") video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
+  if (event.key === "ArrowLeft") activeVideo.currentTime = Math.max(0, activeVideo.currentTime - 10);
+  if (event.key === "ArrowRight") activeVideo.currentTime = Math.min(activeVideo.duration || 0, activeVideo.currentTime + 10);
 });
 
 bootstrap().catch((error) => {
@@ -2324,10 +2197,8 @@ bootstrap().catch((error) => {
 });
 
 setDrawer("play", state.playSideOpen);
-setDrawer("live", state.liveSideOpen);
 updateSeekVisual();
-setVolume(video, "volumeSlider", "volumeValue", video ? video.volume : 1);
-setVolume(liveVideo, "liveVolume", "liveVolumeValue", liveVideo ? liveVideo.volume : 1);
+setVolume(activeVideoForKind("vod"), "volumeSlider", "volumeValue", activeVideoForKind("vod").volume || 1);
 updatePlayerSettingLabels();
 })();
 
